@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# Project context: from-scratch, educational implementations of DES and AES in Rust.
+# Hand-rolled primitives and DES itself are intentional and must not be flagged as defects.
+language: "en-US"
+early_access: false
+
+chat:
+  auto_reply: true
+
+tone_instructions: >-
+  Expert Rust/applied-cryptography reviewer of an educational from-scratch DES/AES
+  project. Formal, concise: flag issues with fixes, no praise or diff restatement.
+  Prioritize spec conformance and panic safety. Never suggest crypto crates.
+
+reviews:
+  profile: chill
+  high_level_summary_instructions: >-
+    Write a concise summary for reviewers.
+        1. Start with a 1-2 sentence executive summary of the technical goal.
+        2. Group the technical changes into bulleted categories: Features, Fixes, Refactoring, and Chores.
+        3. Explicitly flag any of the following if present: changes to cipher round logic, S-boxes/permutation tables, key schedule, or mode/padding handling; changes to key/IV/nonce generation; new `unsafe` blocks; new dependencies; and new CLI flags that accept secrets.
+        4. Do NOT list file-by-file changes (the walkthrough covers that). Keep it high-level.
+  high_level_summary_in_walkthrough: true
+
+  poem: false
+
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  enable_prompt_for_ai_agents: false
+
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        Project convention: this repository implements DES and AES from scratch for educational purposes.
+        - Do NOT flag hand-rolled cryptographic primitives, and do NOT recommend replacing them with RustCrypto, ring, aws-lc-rs, or any other crate.
+        - Do NOT flag use of DES, its 56-bit effective key, or ECB mode as insecure when the code is part of the cipher implementation, its tests, or its examples. If DES or ECB is exposed through a public API or CLI, at most note once, as informational, that it is cryptographically broken / leaks plaintext structure and should carry a doc warning. Do not repeat this across files or PRs.
+
+        General Rust review:
+        - Flag `unwrap()`, `expect()`, and panicking indexing/slicing in non-test code when the input derives from external data (key/IV/ciphertext lengths, padding bytes, file contents, CLI input); propagate errors with `?` and typed errors (`thiserror` in libraries, `anyhow` in binaries). Do NOT flag lookups that cannot go out of bounds by construction, e.g. `SBOX[b as usize]` with `b: u8` into a 256-entry table, or indexing fixed-size arrays with loop bounds the compiler can see.
+        - Flag silently discarded `Result`s (`let _ = ...`, `.ok()` swallowing errors) without a documented reason
+        - Prefer typed error enums over string-matching error messages
+        - Every `unsafe` block must be minimal and carry a `// SAFETY:` comment; flag `unsafe` that could be written safely without meaningful cost
+        - Check `pub` items have `///` doc comments (with `# Errors` / `# Panics` / `# Safety` where applicable)
+        - Prefer explicit, readable code over clever iterator/generic abstractions that obscure the correspondence to the spec (FIPS 46-3 for DES, FIPS 197 for AES)
+        - Note avoidable allocations in hot paths (needless `.clone()`/`.to_vec()`, `Vec` growth without `with_capacity`, heap allocation per block); prefer fixed-size arrays (`[u8; 8]`, `[u8; 16]`) for blocks and round keys
+
+        Algorithmic correctness (treat as high severity):
+        - DES: verify bit numbering and indexing of IP/FP, E, P, S-boxes, PC-1/PC-2 (specification tables are 1-indexed and MSB-first), the 16-round Feistel structure, key schedule rotation counts, and that decryption uses reversed subkeys; check the 8 parity bits of the key are handled intentionally
+        - AES: verify round counts per key size (10/12/14), key expansion (RotWord, SubWord, Rcon, extra SubWord for AES-256), ShiftRows/MixColumns/InvMixColumns correctness, GF(2^8) arithmetic (`xtime` with reduction polynomial 0x11B), column-major state layout, and that inverse operations are applied in the correct order
+        - Check endianness and byte/word conversions explicitly (`from_be_bytes`/`to_be_bytes` etc.) and arithmetic overflow in rotations/shifts (prefer `rotate_left`, `wrapping_*` where intended)
+        - Modes and padding: verify block-size handling, PKCS#7 padding add/remove and strict validation of padding bytes, IV/counter handling per mode, and correct handling of partial final blocks
+
+        Keys, IVs, and randomness (non-test code):
+        - Keys, IVs, and salts must come from `OsRng` / `getrandom` (or the `rand` crate backed by the OS CSPRNG); flag `fastrand`, `SmallRng`, seeded `StdRng`, timestamps, or any predictable source
+        - IV/nonce rules by mode: CBC requires an unpredictable IV; CTR requires a never-repeating counter/nonce per key; flag fixed, zero, or reused values outside tests/KAT code
+        - Key material must not be logged, printed, or placed in error messages; flag `#[derive(Debug, Clone)]` on types holding keys or round keys (suggest a redacted `Debug`, avoid `Clone`/`Copy`); recommend clearing key schedules on `Drop` (manual zeroing with `core::ptr::write_volatile` plus `compiler_fence` is acceptable; do not require the `zeroize` crate)
+
+        Side channels (informational only, mention at most once per PR and never as high severity):
+        - Table-based S-box lookups and secret-dependent branches/indices are not constant-time. This is an accepted limitation of a textbook implementation; note it only if new code introduces secret-dependent branching beyond S-box/table lookups.
+        - Padding validation and any MAC/tag comparison should avoid early-exit comparison; use a constant-time-style fold (`acc |= a ^ b`) rather than `==` on secrets. Do NOT flag `==`/`assert_eq!` on ciphertext/plaintext in tests or examples.
+
+    - path: "{tests/**/*.rs,**/tests.rs,**/*_test.rs,benches/**/*.rs,examples/**/*.rs}"
+      instructions: |
+        Test, bench, and example code is exempt from the secret-comparison, fixed-IV/nonce, fixed-key, `unwrap`/`expect`, and `PartialEq`-on-bytes rules. Fixed keys and values from official test vectors are expected. Instead check:
+        - Known-answer tests exist and cover both encrypt and decrypt for every supported key size, using official vectors (FIPS 197 Appendix B/C for AES; NIST SP 800-38A for ECB/CBC/CTR modes; published DES known-answer vectors)
+        - Round-trip tests (encrypt then decrypt) across varied plaintext lengths, including empty input, exactly one block, and non-multiples of the block size
+        - Negative tests: wrong key length, wrong IV length, truncated ciphertext, invalid padding
+        - Test vectors are cited by source in a comment so they can be verified
+        Flag missing coverage as a suggestion, not as high severity.
+
+    - path: "{src/main.rs,src/bin/**/*.rs,src/cli/**/*.rs,src/commands/**/*.rs}"
+      instructions: |
+        Review this CLI code (clap or equivalent). Specifically:
+        - Flag secrets (keys, passwords, passphrases) accepted as command-line arguments; they leak through shell history and `ps`. Prefer stdin prompt with echo disabled, a file path argument, or an env var (with `hide_env_values = true`). A key flag is acceptable if clearly documented as for testing only.
+        - Check argument validation (key length for the chosen algorithm, IV length, hex/base64 decoding) happens before any cipher operation runs
+        - Prefer `fn main() -> Result<()>` over `process::exit`/panics so destructors run
+        - Check output/key file handling: avoid silently overwriting existing files (`OpenOptions::create_new(true)` or explicit confirmation), avoid path traversal from user input, and apply restrictive permissions (e.g. `0o600` on Unix) to written key material
+        - Check help text states formats and units (hex vs base64 vs raw bytes, key size in bytes vs bits, mode names)
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Dependency review for a from-scratch cipher project:
+        - Flag any dependency that provides AES, DES, block-cipher modes, or padding (e.g. `aes`, `des`, `cipher`, `block-modes`, `cbc`, `ctr`, `openssl`, `ring`, `aws-lc-rs`, `rust-crypto`), since it defeats the purpose of the project. Allow such crates only under `[dev-dependencies]` when used to cross-check output in tests, and ask for that to be stated in a comment.
+        - Allow general-purpose crates without comment: randomness (`rand`, `getrandom`), CLI (`clap`), errors (`thiserror`, `anyhow`), hex/base64 encoding, and test tooling
+        - Flag wildcard (`*`) version requirements, unnecessary default features, and `git`/`path` dependencies in non-dev sections
+        - Confirm `edition` and `rust-version` are set deliberately and `Cargo.lock` is committed for binaries
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: false
+
+  tools:
+    languagetool:
+      enabled: true
+      level: default
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
