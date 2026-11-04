@@ -46,7 +46,8 @@ reviews:
         - Flag silently discarded `Result`s (`let _ = ...`, `.ok()` swallowing errors) without a documented reason
         - Prefer typed error enums over string-matching error messages
         - Every `unsafe` block must be minimal and carry a `// SAFETY:` comment; flag `unsafe` that could be written safely without meaningful cost
-        - Check `pub` items have `///` doc comments (with `# Errors` / `# Panics` / `# Safety` where applicable)
+        - Check `pub` items have `///` doc comments (with `# Errors` / `# Panics` / `# Safety` where applicable), laid out as a one-sentence summary, then details, then the sections `# Arguments`, `# Errors`, `# Panics`, `# Safety`, `# Examples`, in that order and only where they apply
+        - Flag new inline `#[cfg(test)] mod tests { ... }` blocks: tests go in the module's own `tests.rs`. Do not flag existing inline blocks that a change only touches
         - Prefer explicit, readable code over clever iterator/generic abstractions that obscure the correspondence to the spec (FIPS 46-3 for DES, FIPS 197 for AES)
         - Note avoidable allocations in hot paths (needless `.clone()`/`.to_vec()`, `Vec` growth without `with_capacity`, heap allocation per block); prefer fixed-size arrays (`[u8; 8]`, `[u8; 16]`) for blocks and round keys
 
