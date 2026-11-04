@@ -22,5 +22,19 @@ target
 
 
 # Added by cargo
-
 /target
+
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# Output of the ecb_vs_cbc example
+/demo_out
+
+# Output of oes bench
+/bench_results
+/bench_files
+
+# Notes
+/notes
