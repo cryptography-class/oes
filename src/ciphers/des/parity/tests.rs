@@ -1,6 +1,6 @@
 use super::{check_parity, first_bad_parity_byte, set_parity};
 use crate::ciphers::des::cipher::DesCipher;
-use crate::ciphers::traits::BlockCipher;
+use crate::ciphers::traits::{BlockCipher, KeyInit};
 
 const KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 

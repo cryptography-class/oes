@@ -1,5 +1,5 @@
 use super::DesCipher;
-use crate::ciphers::traits::BlockCipher;
+use crate::ciphers::traits::{BlockCipher, KeyInit};
 
 #[test]
 fn des_encrypt_known_vector() {

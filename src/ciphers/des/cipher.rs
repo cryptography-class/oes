@@ -1,15 +1,10 @@
 use super::{key_schedule, round};
-use crate::ciphers::traits::{Block, BlockCipher};
+use crate::ciphers::traits::{Block, BlockCipher, KeyInit};
 use crate::secret::wipe;
 
 /// A DES block, stored big-endian so that the first byte holds specification bits 1 to 8.
 impl Block for u64 {
     const SIZE: usize = 8;
-
-    #[inline(always)]
-    fn xor_assign(&mut self, other: &Self) {
-        *self ^= *other;
-    }
 
     #[inline(always)]
     fn from_bytes(bytes: &[u8]) -> Self {
@@ -35,7 +30,7 @@ impl Block for u64 {
 ///
 /// ```
 /// use oes::ciphers::des::DesCipher;
-/// use oes::ciphers::traits::BlockCipher;
+/// use oes::ciphers::traits::{BlockCipher, KeyInit};
 ///
 /// // Test vector from "The DES Algorithm Illustrated" by J. Orlin Grabbe.
 /// let cipher = DesCipher::new(&[0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]);
@@ -57,15 +52,16 @@ impl Drop for DesCipher {
     }
 }
 
-impl BlockCipher<8> for DesCipher {
-    type Block = u64;
-    const BLOCK_SIZE: usize = 8;
-
+impl KeyInit<8> for DesCipher {
     fn new(key: &[u8; 8]) -> Self {
         Self {
             round_keys: key_schedule::generate_round_keys(key),
         }
     }
+}
+
+impl BlockCipher for DesCipher {
+    type Block = u64;
 
     #[inline]
     fn encrypt_block(&self, block: &mut Self::Block) {
