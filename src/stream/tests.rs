@@ -4,11 +4,11 @@ use std::io::{self, Cursor, ErrorKind, Read, Write};
 use super::errors::StreamError;
 use super::io_util::{aligned_capacity, read_full};
 use super::test_util::TempDir;
-use super::{AtomicFile, DEFAULT_BUFFER_SIZE, decrypt_stream, encrypt_stream};
+use super::{AtomicFile, DEFAULT_BUFFER_SIZE, apply_ctr_stream, decrypt_stream, encrypt_stream};
 use crate::ciphers::des::DesCipher;
 use crate::ciphers::traits::KeyInit;
 use crate::modes::errors::ModeError;
-use crate::modes::{BlockMode, Cbc, Ecb};
+use crate::modes::{BlockMode, Cbc, Ctr, Ecb};
 use crate::padding::errors::PaddingError;
 use crate::padding::{Fill, Padding};
 
@@ -50,6 +50,10 @@ fn des_mode(kind: Kind) -> Box<dyn BlockMode> {
         Kind::Ecb => Box::new(Ecb::new(cipher)),
         Kind::Cbc => Box::new(Cbc::new(cipher, &IV).unwrap()),
     }
+}
+
+fn des_ctr() -> Ctr<DesCipher> {
+    Ctr::new(DesCipher::new(&KEY), &IV).unwrap()
 }
 
 fn sample_byte(i: u64) -> u8 {
@@ -602,6 +606,79 @@ fn decrypt_stream_through_atomic_file_leaves_nothing_on_failure() {
 
     drop(file);
     assert!(dir.entries().is_empty());
+}
+
+// ---- apply_ctr_stream ----
+
+#[test]
+fn apply_ctr_stream_matches_one_keystream_call_for_any_buffer_or_read_size() {
+    for len in LENS {
+        let data = sample(len);
+        let mut expected = data.clone();
+        des_ctr().apply_keystream(&mut expected).unwrap();
+
+        for buf_size in BUF_SIZES {
+            for limit in READ_LIMITS {
+                let context = format!("len {len} buf_size {buf_size} limit {limit}");
+                let mut reader = LimitedReader {
+                    inner: Cursor::new(&data),
+                    limit,
+                };
+                let mut out = Vec::new();
+                let counts =
+                    apply_ctr_stream(&mut des_ctr(), &mut reader, &mut out, buf_size).unwrap();
+
+                assert_eq!(out, expected, "{context}");
+                assert_eq!(counts.bytes_in, len as u64, "{context}");
+                assert_eq!(counts.bytes_out, len as u64, "{context}");
+            }
+        }
+    }
+}
+
+#[test]
+fn apply_ctr_stream_restores_the_input_when_run_twice() {
+    let data = sample(1025);
+
+    let mut ciphertext = Vec::new();
+    apply_ctr_stream(&mut des_ctr(), &mut Cursor::new(&data), &mut ciphertext, 64).unwrap();
+    assert_ne!(ciphertext, data);
+
+    let mut plaintext = Vec::new();
+    apply_ctr_stream(
+        &mut des_ctr(),
+        &mut Cursor::new(&ciphertext),
+        &mut plaintext,
+        64,
+    )
+    .unwrap();
+    assert_eq!(plaintext, data);
+}
+
+#[test]
+fn apply_ctr_stream_reports_io_failures() {
+    let result = apply_ctr_stream(&mut des_ctr(), &mut FailingReader, &mut Vec::new(), 64);
+    assert!(matches!(result, Err(StreamError::Io(_))), "{result:?}");
+
+    let mut input = Cursor::new(sample(100));
+    let result = apply_ctr_stream(&mut des_ctr(), &mut input, &mut FailingWriter, 64);
+    assert!(matches!(result, Err(StreamError::Io(_))), "{result:?}");
+}
+
+#[test]
+fn apply_ctr_stream_rejects_a_mode_that_already_ended_its_message() {
+    let mut mode = des_ctr();
+    mode.apply_keystream(&mut [0u8; 3]).unwrap();
+
+    let mut input = Cursor::new(sample(8));
+    let result = apply_ctr_stream(&mut mode, &mut input, &mut Vec::new(), 64);
+    assert!(
+        matches!(
+            result,
+            Err(StreamError::Mode(ModeError::DataAfterPartialBlock))
+        ),
+        "{result:?}"
+    );
 }
 
 // ---- large files ----
