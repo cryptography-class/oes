@@ -23,7 +23,7 @@ pub enum Padding {
 
 impl Padding {
     /// Rejects block sizes the padding length can't describe or the scheme doesn't allow.
-    fn check_block_size(&self, block_size: usize) -> Result<(), PaddingError> {
+    pub(crate) fn check_block_size(&self, block_size: usize) -> Result<(), PaddingError> {
         if block_size == 0 || block_size > 255 {
             return Err(PaddingError::InvalidBlockSize(block_size))
         }
