@@ -1,5 +1,5 @@
 use super::errors::ModeError;
-use super::{BlockMode, Cbc, Ecb};
+use super::{BlockMode, Cbc, Ctr, Ecb};
 use crate::ciphers::des::DesCipher;
 use crate::ciphers::traits::KeyInit;
 
@@ -123,6 +123,93 @@ fn cbc_rejects_unaligned_input_and_keeps_the_data_and_chain() {
     let mut aligned = *PLAINTEXT;
     cbc.encrypt(&mut aligned).unwrap();
     assert_eq!(aligned, CBC_CIPHERTEXT);
+}
+
+// ---- Ctr ----
+
+// SP 800-38A only has AES vectors for CTR, so this uses a DES one: with a zero
+// plaintext, the first output block is the encrypted counter. The vector is from
+// "The DES Algorithm Illustrated" by J. Orlin Grabbe.
+#[test]
+fn ctr_known_answer_des_block() {
+    let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+    let counter = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+    let mut data = [0u8; 8];
+    Ctr::new(DesCipher::new(&key), &counter).unwrap().apply_keystream(&mut data).unwrap();
+    assert_eq!(data, [0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05]);
+}
+
+/// The counter blocks are written out by hand, and the keystream comes from ECB,
+/// so this doesn't depend on the code under test. The cases cover a carry between
+/// bytes and the wrap at the block size. The last block is partial.
+#[test]
+fn ctr_matches_ecb_of_literal_counter_blocks() {
+    let cases: [[[u8; 8]; 3]; 2] = [
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0xFF],
+            [0, 0, 0, 0, 0, 0, 1, 0x00],
+            [0, 0, 0, 0, 0, 0, 1, 0x01],
+        ],
+        [
+            [0xFF; 8],
+            [0x00; 8],
+            [0, 0, 0, 0, 0, 0, 0, 0x01],
+        ],
+    ];
+    for counters in cases {
+        let mut keystream = counters.concat();
+        Ecb::new(des()).encrypt(&mut keystream).unwrap();
+        let expected: Vec<u8> = PLAINTEXT[..20].iter().zip(&keystream).map(|(p, k)| p ^ k).collect();
+
+        let mut data = PLAINTEXT[..20].to_vec();
+        Ctr::new(des(), &counters[0]).unwrap().apply_keystream(&mut data).unwrap();
+        assert_eq!(data, expected, "starting at {:02X?}", counters[0]);
+    }
+}
+
+#[test]
+fn ctr_gives_the_same_bytes_across_splits_and_restores_the_input() {
+    for len in [0, 1, 7, 8, 9, 515] {
+        let plaintext = sample(len);
+        let mut expected = plaintext.clone();
+        Ctr::new(des(), &IV).unwrap().apply_keystream(&mut expected).unwrap();
+
+        for split in [0, BLOCK.min(len / BLOCK * BLOCK), len / BLOCK * BLOCK] {
+            let mut ctr = Ctr::new(des(), &IV).unwrap();
+            let mut buffer = plaintext.clone();
+            let (first, second) = buffer.split_at_mut(split);
+            ctr.apply_keystream(first).unwrap();
+            ctr.apply_keystream(second).unwrap();
+            assert_eq!(buffer, expected, "length {len}, split at {split}");
+
+            let mut ctr = Ctr::new(des(), &IV).unwrap();
+            ctr.apply_keystream(&mut buffer).unwrap();
+            assert_eq!(buffer, plaintext, "length {len}, split at {split}");
+        }
+    }
+}
+
+#[test]
+fn ctr_new_rejects_a_counter_that_is_not_one_block() {
+    for len in [0, 7, 9, 16] {
+        let result = Ctr::new(des(), &vec![0; len]);
+        assert_eq!(
+            result.err(),
+            Some(ModeError::InvalidIvLength { len, expected: BLOCK }),
+            "counter length {len}"
+        );
+    }
+}
+
+#[test]
+fn ctr_rejects_data_after_a_partial_block_and_keeps_it() {
+    let mut ctr = Ctr::new(des(), &IV).unwrap();
+    ctr.apply_keystream(&mut [0; 9]).unwrap();
+    assert_eq!(ctr.apply_keystream(&mut []), Ok(()));
+
+    let mut data = [7; 8];
+    assert_eq!(ctr.apply_keystream(&mut data), Err(ModeError::DataAfterPartialBlock));
+    assert_eq!(data, [7; 8]);
 }
 
 // ---- BlockMode ----

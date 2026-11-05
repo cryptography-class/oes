@@ -8,6 +8,8 @@ pub enum ModeError {
     InvalidLength { len: usize, block_size: usize },
     /// The IV isn't exactly one block long.
     InvalidIvLength { len: usize, expected: usize },
+    /// More data arrived after a chunk that ended in a partial block.
+    DataAfterPartialBlock,
 }
 
 impl fmt::Display for ModeError {
@@ -18,6 +20,9 @@ impl fmt::Display for ModeError {
             }
             Self::InvalidIvLength { len, expected } => {
                 write!(f, "IV length {len} is invalid, expected {expected}")
+            }
+            Self::DataAfterPartialBlock => {
+                write!(f, "only the last chunk of a message may end in a partial block")
             }
         }
     }

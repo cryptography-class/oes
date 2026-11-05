@@ -5,19 +5,22 @@
 //! plaintext blocks give equal ciphertext blocks, so patterns stay visible.
 //!
 //! ECB and CBC work in place on a whole number of blocks, with padding as a
-//! separate step in [`crate::padding`]. Neither of them authenticates anything, so
-//! changed ciphertext decrypts to wrong bytes without an error.
+//! separate step in [`crate::padding`]. CTR works in place on any length and needs
+//! no padding. None of them authenticates anything, so changed ciphertext decrypts
+//! to wrong bytes without an error.
 //!
 //! Modes keep their state between calls, so data can be processed chunk by chunk.
 //! Use a new instance for each encryption or decryption run.
 
 mod blocks;
 mod cbc;
+mod ctr;
 mod ecb;
 pub mod errors;
 mod traits;
 
 pub use cbc::Cbc;
+pub use ctr::Ctr;
 pub use ecb::Ecb;
 pub use traits::BlockMode;
 
