@@ -60,7 +60,12 @@ pub(super) fn read_full<R: Read + ?Sized>(reader: &mut R, buf: &mut [u8]) -> io:
     Ok(filled)
 }
 
-/// Rounds `buf_size` down to a whole number of blocks, with a minimum of one block.
+/// The largest buffer size the stream functions use: 1 GiB. Larger requests are
+/// lowered to it.
+pub const MAX_BUFFER_SIZE: usize = 1 << 30;
+
+/// Caps `buf_size` at [`MAX_BUFFER_SIZE`] and rounds it down to a whole number of
+/// blocks, with a minimum of one block.
 pub(super) fn aligned_capacity(buf_size: usize, block_size: usize) -> usize {
-    (buf_size / block_size).max(1) * block_size
+    (buf_size.min(MAX_BUFFER_SIZE) / block_size).max(1) * block_size
 }

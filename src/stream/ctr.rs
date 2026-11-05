@@ -15,8 +15,8 @@ use crate::modes::Ctr;
 ///
 /// - `mode`: a new mode instance, built with its key and starting counter.
 /// - `reader`, `writer`: the input and the output.
-/// - `buf_size`: the memory to use, rounded down to whole blocks, with a minimum of
-///   one block.
+/// - `buf_size`: the memory to use, capped at [`MAX_BUFFER_SIZE`](super::MAX_BUFFER_SIZE)
+///   and rounded down to whole blocks, with a minimum of one block.
 ///
 /// # Errors
 ///

@@ -18,8 +18,8 @@ pub const DEFAULT_BUFFER_SIZE: usize = 1 << 20;
 /// - `mode`: a new mode instance, built with its key and IV.
 /// - `padding`: the scheme to add, which decryption must match.
 /// - `reader`, `writer`: the input and the output.
-/// - `buf_size`: the memory to use, rounded down to whole blocks, with a minimum of
-///   one block.
+/// - `buf_size`: the memory to use, capped at [`MAX_BUFFER_SIZE`](super::MAX_BUFFER_SIZE)
+///   and rounded down to whole blocks, with a minimum of one block.
 ///
 /// # Errors
 ///
@@ -117,8 +117,9 @@ where
 /// - `mode`: a new mode instance, built with the key and IV used to encrypt.
 /// - `padding`: the scheme used to encrypt.
 /// - `reader`, `writer`: the input and the output.
-/// - `buf_size`: the memory to use, rounded down to whole blocks, with a minimum of
-///   one block. One more block is added for the block held back.
+/// - `buf_size`: the memory to use, capped at [`MAX_BUFFER_SIZE`](super::MAX_BUFFER_SIZE)
+///   and rounded down to whole blocks, with a minimum of one block. One
+///   more block is added for the block held back.
 ///
 /// # Errors
 ///

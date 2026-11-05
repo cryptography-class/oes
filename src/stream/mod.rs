@@ -20,7 +20,7 @@ mod padded;
 
 pub use atomic::AtomicFile;
 pub use ctr::apply_ctr_stream;
-pub use io_util::ByteCounts;
+pub use io_util::{ByteCounts, MAX_BUFFER_SIZE};
 pub use padded::{DEFAULT_BUFFER_SIZE, decrypt_stream, encrypt_stream};
 
 #[cfg(test)]

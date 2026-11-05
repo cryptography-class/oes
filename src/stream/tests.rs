@@ -214,6 +214,12 @@ fn aligned_capacity_rounds_down_with_a_minimum_of_one_block() {
     assert_eq!(aligned_capacity(40, 16), 32);
 }
 
+#[test]
+fn aligned_capacity_caps_huge_sizes() {
+    assert_eq!(aligned_capacity(usize::MAX, 8), 1 << 30);
+    assert_eq!(aligned_capacity((1 << 30) + 8, 8), 1 << 30);
+}
+
 // ---- AtomicFile ----
 
 #[test]
