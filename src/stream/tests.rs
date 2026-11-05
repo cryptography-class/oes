@@ -26,6 +26,11 @@ const CBC_CIPHERTEXT: [u8; 24] = [
     0x43, 0xE9, 0x34, 0x00, 0x8C, 0x38, 0x9C, 0x0F, //
     0x68, 0x37, 0x88, 0x49, 0x9A, 0x7C, 0x05, 0xF6,
 ];
+// FIPS 81 stops at the third block. The PKCS#7 padding block that follows was
+// computed with OpenSSL 3.5 (`openssl enc -des-ecb` and `-des-cbc`, same key and
+// IV), whose first three blocks match the FIPS 81 tables.
+const ECB_PADDING_BLOCK: [u8; 8] = [0x08, 0x6F, 0x9A, 0x1D, 0x74, 0xC9, 0x4D, 0x4E];
+const CBC_PADDING_BLOCK: [u8; 8] = [0x62, 0xC1, 0x6A, 0x27, 0xE4, 0xFC, 0xF2, 0x77];
 
 const ALL_PADDINGS: [Padding; 4] = [
     Padding::Pkcs7,
@@ -54,6 +59,20 @@ fn des_mode(kind: Kind) -> Box<dyn BlockMode> {
 
 fn des_ctr() -> Ctr<DesCipher> {
     Ctr::new(DesCipher::new(&KEY), &IV).unwrap()
+}
+
+/// The FIPS 81 ciphertexts followed by their padding blocks.
+fn padded_known_answers() -> [(Kind, Vec<u8>); 2] {
+    [
+        (
+            Kind::Ecb,
+            [&ECB_CIPHERTEXT[..], &ECB_PADDING_BLOCK].concat(),
+        ),
+        (
+            Kind::Cbc,
+            [&CBC_CIPHERTEXT[..], &CBC_PADDING_BLOCK].concat(),
+        ),
+    ]
 }
 
 fn sample_byte(i: u64) -> u8 {
@@ -307,11 +326,12 @@ fn commit_refuses_a_target_that_appeared_after_create() {
 
 #[test]
 fn encrypt_stream_known_answer_fips_81() {
-    // The vectors end at the third block, and aligned input gains a padding block.
-    for (kind, expected) in [(Kind::Ecb, ECB_CIPHERTEXT), (Kind::Cbc, CBC_CIPHERTEXT)] {
-        let out = encrypted(kind, Padding::Pkcs7, PLAINTEXT);
-        assert_eq!(out.len(), 32, "{kind:?}");
-        assert_eq!(out[..24], expected, "{kind:?}");
+    for (kind, ciphertext) in padded_known_answers() {
+        assert_eq!(
+            encrypted(kind, Padding::Pkcs7, PLAINTEXT),
+            ciphertext,
+            "{kind:?}"
+        );
     }
 }
 
@@ -392,6 +412,17 @@ fn encrypt_stream_rejects_pkcs5_on_other_block_sizes_before_reading() {
 }
 
 // ---- decrypt_stream ----
+
+#[test]
+fn decrypt_stream_known_answer_fips_81() {
+    for (kind, ciphertext) in padded_known_answers() {
+        assert_eq!(
+            decrypted(kind, Padding::Pkcs7, &ciphertext).unwrap(),
+            PLAINTEXT,
+            "{kind:?}"
+        );
+    }
+}
 
 #[test]
 fn decrypt_stream_restores_every_mode_padding_length_and_buffer_size() {
@@ -615,6 +646,18 @@ fn decrypt_stream_through_atomic_file_leaves_nothing_on_failure() {
 }
 
 // ---- apply_ctr_stream ----
+
+// With a zero plaintext, the output is the encrypted counter. The DES vector is
+// from "The DES Algorithm Illustrated" by J. Orlin Grabbe.
+#[test]
+fn apply_ctr_stream_known_answer_des_block() {
+    let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+    let counter = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+    let mut mode = Ctr::new(DesCipher::new(&key), &counter).unwrap();
+    let mut out = Vec::new();
+    apply_ctr_stream(&mut mode, &mut Cursor::new([0u8; 8]), &mut out, 64).unwrap();
+    assert_eq!(out, [0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05]);
+}
 
 #[test]
 fn apply_ctr_stream_matches_one_keystream_call_for_any_buffer_or_read_size() {
