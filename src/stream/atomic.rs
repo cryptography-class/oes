@@ -59,24 +59,30 @@ impl AtomicFile {
         })
     }
 
-    /// Flushes the data to disk and renames the temporary file onto the target.
+    /// Flushes the data to disk and moves the temporary file onto the target.
+    ///
+    /// Without `overwrite`, the target is published with a hard link, which fails if
+    /// the target exists, even one created a moment earlier by another process. On
+    /// filesystems without hard links, such as FAT, it falls back to a check and a
+    /// rename, which leaves a short window for that race.
     ///
     /// # Errors
     ///
     /// - [`ErrorKind::AlreadyExists`] if the target appeared after
     ///   [`create`](Self::create) and `overwrite` is false.
-    /// - Any error from syncing or renaming.
+    /// - Any error from syncing, linking or renaming.
     ///
     /// The temporary file is deleted on every error.
     pub fn commit(mut self) -> io::Result<()> {
-        if !self.overwrite && self.target.exists() {
-            return Err(already_exists(&self.target));
-        }
         if let Some(file) = self.file.take() {
             file.sync_all()?;
             // Dropping `file` here closes it, which Windows requires before a rename.
         }
-        fs::rename(&self.tmp, &self.target)?;
+        if self.overwrite {
+            fs::rename(&self.tmp, &self.target)?;
+        } else {
+            publish_new(&self.tmp, &self.target)?;
+        }
         self.committed = true;
         Ok(())
     }
@@ -103,6 +109,27 @@ impl Drop for AtomicFile {
         if !self.committed {
             drop(self.file.take());
             let _ = fs::remove_file(&self.tmp);
+        }
+    }
+}
+
+/// Moves `tmp` to `target`, failing if `target` exists.
+fn publish_new(tmp: &Path, target: &Path) -> io::Result<()> {
+    match fs::hard_link(tmp, target) {
+        Ok(()) => {
+            // The target is complete now, so a temp file that can't be removed
+            // shouldn't turn the run into a failure.
+            let _ = fs::remove_file(tmp);
+            Ok(())
+        }
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => Err(already_exists(target)),
+        // No hard links on this filesystem, or another problem that the rename
+        // will report again.
+        Err(_) => {
+            if target.exists() {
+                return Err(already_exists(target));
+            }
+            fs::rename(tmp, target)
         }
     }
 }
