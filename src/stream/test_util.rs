@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,11 +11,18 @@ pub struct TempDir(PathBuf);
 
 impl TempDir {
     /// Creates a new empty directory whose name includes `tag`.
+    ///
+    /// A directory left by an earlier, killed run is skipped rather than reused.
     pub fn new(tag: &str) -> Self {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("oes-test-{tag}-{}-{n}", process::id()));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
+        loop {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("oes-test-{tag}-{}-{n}", process::id()));
+            match fs::create_dir(&path) {
+                Ok(()) => return Self(path),
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("can't create {}: {e}", path.display()),
+            }
+        }
     }
 
     /// Returns the path of the directory.
