@@ -1,5 +1,6 @@
 pub mod bits;
 pub mod ciphers;
+pub mod container;
 pub mod modes;
 pub mod padding;
 pub mod secret;
