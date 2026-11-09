@@ -45,6 +45,7 @@ fn keygen(args: &KeygenArgs) -> CliResult<()> {
 }
 
 fn encrypt(args: &EncryptArgs) -> CliResult<()> {
+    let parallel = start_threads(args.threads)?;
     let started = Instant::now();
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
@@ -80,6 +81,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
         &mut input,
         &mut output,
         buffer_size,
+        parallel,
     )?;
     if counts.bytes_in != original_len {
         return Err(format!(
@@ -92,7 +94,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
     let elapsed = started.elapsed();
 
     if args.verify {
-        verify(&args.output, &args.input, &key, buffer_size)?;
+        verify(&args.output, &args.input, &key, buffer_size, parallel)?;
     }
 
     print_table(
@@ -109,6 +111,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
             ("Output", file_with_size(&args.output)?),
             ("Cipher", cipher_name(&header)),
             ("Buffer", format!("{buffer_size} bytes")),
+            ("Threads", args.threads.to_string()),
             ("Time", seconds(elapsed)),
             ("Throughput", throughput(original_len, elapsed)),
             ("Peak heap", mib(peak_heap_bytes() as u64)),
@@ -118,6 +121,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
 }
 
 fn decrypt(args: &DecryptArgs) -> CliResult<()> {
+    let parallel = start_threads(args.threads)?;
     let started = Instant::now();
     let buffer_size = args.buffer_size as usize;
 
@@ -126,7 +130,14 @@ fn decrypt(args: &DecryptArgs) -> CliResult<()> {
     let key = Key::load(header.algorithm, &args.key)?;
 
     let mut output = AtomicFile::create(&args.output, args.force)?;
-    decrypt_into(&header, &key, &mut input, &mut output, buffer_size)?;
+    decrypt_into(
+        &header,
+        &key,
+        &mut input,
+        &mut output,
+        buffer_size,
+        parallel,
+    )?;
     output.commit()?;
     let elapsed = started.elapsed();
 
@@ -145,12 +156,26 @@ fn decrypt(args: &DecryptArgs) -> CliResult<()> {
             ),
             ("Cipher", cipher_name(&header)),
             ("Buffer", format!("{buffer_size} bytes")),
+            ("Threads", args.threads.to_string()),
             ("Time", seconds(elapsed)),
             ("Throughput", throughput(header.original_len, elapsed)),
             ("Peak heap", mib(peak_heap_bytes() as u64)),
         ],
     );
     Ok(())
+}
+
+/// Sets up the global Rayon pool with `threads` threads, and returns whether the
+/// modes should run in parallel. One thread builds no pool and keeps the modes on
+/// the calling thread.
+fn start_threads(threads: u16) -> CliResult<bool> {
+    if threads == 1 {
+        return Ok(false);
+    }
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.into())
+        .build_global()?;
+    Ok(true)
 }
 
 /// Which way data goes through the cipher.
@@ -171,6 +196,7 @@ fn run_cipher<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     buffer_size: usize,
+    parallel: bool,
 ) -> CliResult<ByteCounts> {
     match header.algorithm {
         Algorithm::Des => run_mode(
@@ -180,6 +206,7 @@ fn run_cipher<R: Read, W: Write>(
             reader,
             writer,
             buffer_size,
+            parallel,
         ),
     }
 }
@@ -187,8 +214,8 @@ fn run_cipher<R: Read, W: Write>(
 /// Builds the mode named in `header` around `cipher` and streams the data
 /// through it.
 ///
-/// This is the one place where a mode is built, so options such as a thread
-/// count belong here.
+/// This is the one place where a mode is built, and where the parallel option is
+/// applied.
 fn run_mode<C: BlockCipher, R: Read, W: Write>(
     cipher: C,
     header: &Header,
@@ -196,10 +223,11 @@ fn run_mode<C: BlockCipher, R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     buffer_size: usize,
+    parallel: bool,
 ) -> CliResult<ByteCounts> {
     let counts = match header.mode {
         Mode::Ecb => run_padded(
-            &mut Ecb::new(cipher),
+            &mut Ecb::new(cipher).parallel(parallel),
             header,
             direction,
             reader,
@@ -207,7 +235,7 @@ fn run_mode<C: BlockCipher, R: Read, W: Write>(
             buffer_size,
         )?,
         Mode::Cbc => run_padded(
-            &mut Cbc::new(cipher, &header.iv)?,
+            &mut Cbc::new(cipher, &header.iv)?.parallel(parallel),
             header,
             direction,
             reader,
@@ -216,7 +244,7 @@ fn run_mode<C: BlockCipher, R: Read, W: Write>(
         )?,
         // CTR is its own inverse, so both directions are the same operation.
         Mode::Ctr => apply_ctr_stream(
-            &mut Ctr::new(cipher, &header.iv)?,
+            &mut Ctr::new(cipher, &header.iv)?.parallel(parallel),
             reader,
             writer,
             buffer_size,
@@ -250,8 +278,17 @@ fn decrypt_into<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     buffer_size: usize,
+    parallel: bool,
 ) -> CliResult<ByteCounts> {
-    let counts = run_cipher(header, key, Direction::Decrypt, reader, writer, buffer_size)?;
+    let counts = run_cipher(
+        header,
+        key,
+        Direction::Decrypt,
+        reader,
+        writer,
+        buffer_size,
+        parallel,
+    )?;
     if counts.bytes_out != header.original_len {
         return Err(format!(
             "decrypted {} bytes, but the header records {} (truncated or corrupted file)",
@@ -264,7 +301,13 @@ fn decrypt_into<R: Read, W: Write>(
 
 /// Decrypts `container` and compares the result with `original`, without
 /// writing anything to disk.
-fn verify(container: &Path, original: &Path, key: &Key, buffer_size: usize) -> CliResult<()> {
+fn verify(
+    container: &Path,
+    original: &Path,
+    key: &Key,
+    buffer_size: usize,
+    parallel: bool,
+) -> CliResult<()> {
     let mut input = File::open(container)?;
     let header = Header::read_from(&mut input)?;
     let mut writer = CompareWriter {
@@ -274,7 +317,7 @@ fn verify(container: &Path, original: &Path, key: &Key, buffer_size: usize) -> C
         mismatch: None,
     };
 
-    let result = decrypt_into(&header, key, &mut input, &mut writer, buffer_size);
+    let result = decrypt_into(&header, key, &mut input, &mut writer, buffer_size, parallel);
     if let Some(position) = writer.mismatch {
         return Err(format!(
             "verification failed: the decrypted data differs from {} at byte {position}",

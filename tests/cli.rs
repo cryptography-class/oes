@@ -124,6 +124,41 @@ fn round_trip_restores_every_algorithm_mode_and_length() {
     }
 }
 
+/// Encrypting on several threads must give a container that one thread decrypts,
+/// and the other way round. The input spans several pieces of parallel work.
+#[test]
+fn round_trip_works_across_thread_counts() {
+    let len = 3 * 8192 + 5;
+    for algorithm in ALGORITHMS {
+        let setup = Setup::new("cli", algorithm);
+        for mode in ["ecb", "cbc", "ctr"] {
+            for (encrypt_threads, decrypt_threads) in [("4", "1"), ("1", "4")] {
+                let context =
+                    format!("{algorithm} {mode}, {encrypt_threads} threads to {decrypt_threads}");
+                let (input, enc, restored) = (
+                    setup.path("in.bin"),
+                    setup.path("out.enc"),
+                    setup.path("restored.bin"),
+                );
+                fs::write(&input, sample(len)).unwrap();
+
+                let flags = [
+                    "-m",
+                    mode,
+                    "--threads",
+                    encrypt_threads,
+                    "--verify",
+                    "--force",
+                ];
+                assert_success(&setup.encrypt(&input, &enc, &flags), &context);
+                let flags = ["--threads", decrypt_threads, "--force"];
+                assert_success(&setup.decrypt(&enc, &restored, &flags), &context);
+                assert_eq!(fs::read(&restored).unwrap(), sample(len), "{context}");
+            }
+        }
+    }
+}
+
 #[test]
 fn encrypt_draws_a_fresh_iv_each_time() {
     let setup = Setup::new("cli", "des");
