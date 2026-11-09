@@ -1,6 +1,7 @@
 //! Benchmarks of the DES cipher and its modes in memory, with no file I/O: the
-//! time spent on cryptography alone. RustCrypto's `des`, `ecb`, `cbc` and `ctr`
-//! run next to ours as the reference.
+//! time spent on cryptography alone. The RustCrypto crates `des`, `ecb`, `cbc` and
+//! `ctr` are benchmarked alongside as the reference implementation, under names
+//! prefixed with `rustcrypto-`.
 //!
 //! Groups:
 //! - `des-block`: one block encrypted and decrypted, and the key schedule. This is
@@ -23,7 +24,7 @@
 //! exists.
 //!
 //! Windows throttles background processes, and a child process doesn't inherit
-//! Above Normal priority from `start`. So for numbers worth keeping, build with
+//! Above Normal priority from `start`. For reliable measurements, build with
 //! `cargo bench --no-run`, which prints the bench executable's path, and run that
 //! executable from the repository root:
 //!
@@ -31,7 +32,7 @@
 //! start /abovenormal /wait /b target\release\deps\des-<hash>.exe --bench --save-baseline <name>
 //! ```
 //!
-//! DES and ECB are here to be measured. They must not protect real data.
+//! DES and ECB are insecure and must not be used to protect real data.
 
 mod common;
 
@@ -55,18 +56,18 @@ const BLOCK: u64 = 0x0123_4567_89AB_CDEF;
 fn des_block(c: &mut Criterion) {
     let mut group = c.benchmark_group("des-block");
 
-    let ours = DesCipher::new(&KEY);
+    let cipher = DesCipher::new(&KEY);
     group.bench_function("encrypt", |b| {
         b.iter(|| {
             let mut block = black_box(BLOCK);
-            ours.encrypt_block(&mut block);
+            cipher.encrypt_block(&mut block);
             block
         })
     });
     group.bench_function("decrypt", |b| {
         b.iter(|| {
             let mut block = black_box(BLOCK);
-            ours.decrypt_block(&mut block);
+            cipher.decrypt_block(&mut block);
             block
         })
     });
@@ -75,18 +76,18 @@ fn des_block(c: &mut Criterion) {
         b.iter(|| DesCipher::new(black_box(&KEY)))
     });
 
-    let theirs = <des::Des as des::cipher::KeyInit>::new(&KEY.into());
+    let reference = <des::Des as des::cipher::KeyInit>::new(&KEY.into());
     group.bench_function("rustcrypto-encrypt", |b| {
         b.iter(|| {
             let mut block = black_box(BLOCK.to_be_bytes()).into();
-            theirs.encrypt_block(&mut block);
+            reference.encrypt_block(&mut block);
             block
         })
     });
     group.bench_function("rustcrypto-decrypt", |b| {
         b.iter(|| {
             let mut block = black_box(BLOCK.to_be_bytes()).into();
-            theirs.decrypt_block(&mut block);
+            reference.decrypt_block(&mut block);
             block
         })
     });

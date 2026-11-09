@@ -1,8 +1,8 @@
-//! Compares our DES modes byte for byte with the RustCrypto crates `des`, `ecb`,
+//! Compares the DES modes byte for byte with the RustCrypto crates `des`, `ecb`,
 //! `cbc` and `ctr`, which are dev-dependencies used only as a reference.
 //!
-//! Each test checks that both sides produce the same ciphertext and that ours
-//! decrypts the library's ciphertext back to the plaintext.
+//! Each test checks that both implementations produce the same ciphertext and that
+//! the reference ciphertext decrypts back to the plaintext.
 
 use des::cipher::KeyInit as _;
 use des::cipher::block_padding::NoPadding;
@@ -32,17 +32,21 @@ fn ecb_matches_rustcrypto() {
     for len in ALIGNED_LENS {
         let pt = plaintext(len);
 
-        let mut ours = pt.clone();
-        Ecb::new(DesCipher::new(&KEY)).encrypt(&mut ours).unwrap();
-
-        let mut theirs = pt.clone();
-        ecb::Encryptor::<des::Des>::new(&KEY.into())
-            .encrypt_padded::<NoPadding>(&mut theirs, len)
+        let mut ciphertext = pt.clone();
+        Ecb::new(DesCipher::new(&KEY))
+            .encrypt(&mut ciphertext)
             .unwrap();
-        assert_eq!(ours, theirs, "len {len}");
 
-        Ecb::new(DesCipher::new(&KEY)).decrypt(&mut theirs).unwrap();
-        assert_eq!(theirs, pt, "len {len}");
+        let mut reference = pt.clone();
+        ecb::Encryptor::<des::Des>::new(&KEY.into())
+            .encrypt_padded::<NoPadding>(&mut reference, len)
+            .unwrap();
+        assert_eq!(ciphertext, reference, "len {len}");
+
+        Ecb::new(DesCipher::new(&KEY))
+            .decrypt(&mut reference)
+            .unwrap();
+        assert_eq!(reference, pt, "len {len}");
     }
 }
 
@@ -53,49 +57,49 @@ fn cbc_matches_rustcrypto() {
     for len in ALIGNED_LENS {
         let pt = plaintext(len);
 
-        let mut ours = pt.clone();
+        let mut ciphertext = pt.clone();
         Cbc::new(DesCipher::new(&KEY), &IV)
             .unwrap()
-            .encrypt(&mut ours)
+            .encrypt(&mut ciphertext)
             .unwrap();
 
-        let mut theirs = pt.clone();
+        let mut reference = pt.clone();
         cbc::Encryptor::<des::Des>::new(&KEY.into(), &IV.into())
-            .encrypt_padded::<NoPadding>(&mut theirs, len)
+            .encrypt_padded::<NoPadding>(&mut reference, len)
             .unwrap();
-        assert_eq!(ours, theirs, "len {len}");
+        assert_eq!(ciphertext, reference, "len {len}");
 
         Cbc::new(DesCipher::new(&KEY), &IV)
             .unwrap()
-            .decrypt(&mut theirs)
+            .decrypt(&mut reference)
             .unwrap();
-        assert_eq!(theirs, pt, "len {len}");
+        assert_eq!(reference, pt, "len {len}");
     }
 }
 
 // ---- ctr ----
 
 /// RustCrypto's `Ctr64BE` treats the whole 8-byte block as one big-endian counter,
-/// the same as our `Ctr` with DES.
+/// the same as `Ctr` with DES.
 #[test]
 fn ctr_matches_rustcrypto() {
     for len in ANY_LENS {
         let pt = plaintext(len);
 
-        let mut ours = pt.clone();
+        let mut ciphertext = pt.clone();
         Ctr::new(DesCipher::new(&KEY), &IV)
             .unwrap()
-            .apply_keystream(&mut ours)
+            .apply_keystream(&mut ciphertext)
             .unwrap();
 
-        let mut theirs = pt.clone();
-        ctr::Ctr64BE::<des::Des>::new(&KEY.into(), &IV.into()).apply_keystream(&mut theirs);
-        assert_eq!(ours, theirs, "len {len}");
+        let mut reference = pt.clone();
+        ctr::Ctr64BE::<des::Des>::new(&KEY.into(), &IV.into()).apply_keystream(&mut reference);
+        assert_eq!(ciphertext, reference, "len {len}");
 
         Ctr::new(DesCipher::new(&KEY), &IV)
             .unwrap()
-            .apply_keystream(&mut theirs)
+            .apply_keystream(&mut reference)
             .unwrap();
-        assert_eq!(theirs, pt, "len {len}");
+        assert_eq!(reference, pt, "len {len}");
     }
 }

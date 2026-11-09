@@ -1,12 +1,13 @@
 //! Benchmarks of file encryption and decryption through the stream layer, and of
-//! the file reads and writes it does, without the cipher.
+//! the file reads and writes it performs, without the cipher.
 //!
 //! Groups, each over 1, 10 and 100 MiB with the default 1 MiB buffer:
 //! - `io`: `read` reads a file through the buffer and discards it, and `write`
 //!   writes the bytes through [`AtomicFile`] and commits. This is the I/O time.
 //! - `file-encrypt` and `file-decrypt`: ECB and CBC with PKCS#7, and CTR, from one
 //!   file to another the same way the `oes` binary does it. This is the total
-//!   time. The container header, a few dozen bytes, isn't written.
+//!   time. The container header is not written, since at a few dozen bytes it has
+//!   no measurable cost.
 //!
 //! One more group fixes the file at 10 MiB and varies the buffer instead:
 //! - `buffer-size`: CBC file encryption and decryption with buffers from 4 KiB to
@@ -22,7 +23,7 @@
 //! Running, filtering, baselines, raised priority and the report work as described
 //! in `benches/des.rs`. The bench executable here is `stream-<hash>.exe`.
 //!
-//! DES and ECB are here to be measured. They must not protect real data.
+//! DES and ECB are insecure and must not be used to protect real data.
 
 mod common;
 #[path = "../src/stream/test_util.rs"]

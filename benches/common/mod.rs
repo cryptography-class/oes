@@ -13,7 +13,8 @@ pub const SIZES: [usize; 3] = [1 << 20, 10 << 20, 100 << 20];
 pub const KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 pub const IV: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
 
-/// Returns `len` bytes of filler. The content doesn't affect the timing.
+/// Returns `len` bytes of deterministic test data. The content does not affect
+/// the timing.
 pub fn payload(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i * 7 + 3) as u8).collect()
 }
