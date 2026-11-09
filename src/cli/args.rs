@@ -26,6 +26,7 @@ pub enum Command {
     Decrypt(DecryptArgs),
 }
 
+/// Options of the `keygen` command.
 #[derive(Args)]
 pub struct KeygenArgs {
     /// Algorithm the key is for.
@@ -39,6 +40,7 @@ pub struct KeygenArgs {
     pub force: bool,
 }
 
+/// Options of the `encrypt` command.
 #[derive(Args)]
 pub struct EncryptArgs {
     /// File to encrypt.
@@ -71,6 +73,7 @@ pub struct EncryptArgs {
     pub force: bool,
 }
 
+/// Options of the `decrypt` command.
 #[derive(Args)]
 pub struct DecryptArgs {
     /// Container file to decrypt.
@@ -91,6 +94,7 @@ pub struct DecryptArgs {
     pub force: bool,
 }
 
+/// The algorithms accepted by `-a`.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum AlgorithmArg {
     /// DES, with a 56-bit key. Broken; for demonstration only.
@@ -105,6 +109,7 @@ impl From<AlgorithmArg> for Algorithm {
     }
 }
 
+/// The modes of operation accepted by `-m`.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum ModeArg {
     /// Electronic codebook. Leaks patterns; for demonstration only.
@@ -125,6 +130,7 @@ impl From<ModeArg> for Mode {
     }
 }
 
+/// The padding schemes accepted by `-p`.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum PaddingArg {
     /// PKCS#7.
