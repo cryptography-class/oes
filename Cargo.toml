@@ -7,3 +7,23 @@ rust-version = "1.87"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 getrandom = "0.2"
+
+# Benchmarks and the library comparison only. The implementation never uses these:
+# RustCrypto is the reference that our DES, ECB, CBC and CTR are checked and timed
+# against.
+[dev-dependencies]
+cbc = "0.2"
+criterion = "0.8"
+ctr = "0.10"
+des = "0.9"
+ecb = "0.2"
+
+# Turn off the built-in test harness under `cargo bench`, which would reject
+# Criterion's flags such as `--save-baseline`.
+[lib]
+bench = false
+
+[[bin]]
+name = "oes"
+path = "src/main.rs"
+bench = false
