@@ -3,5 +3,6 @@ pub mod ciphers;
 pub mod container;
 pub mod modes;
 pub mod padding;
+pub mod random;
 pub mod secret;
 pub mod stream;
