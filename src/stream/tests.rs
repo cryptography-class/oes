@@ -322,6 +322,21 @@ fn commit_refuses_a_target_that_appeared_after_create() {
     assert_eq!(dir.entries(), ["out.bin"]);
 }
 
+#[cfg(unix)]
+#[test]
+fn create_private_gives_owner_only_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new("atomic");
+    let target = dir.path().join("secret.key");
+    let mut file = AtomicFile::create_private(&target, false).unwrap();
+    file.write_all(b"secret").unwrap();
+    file.commit().unwrap();
+
+    let mode = fs::metadata(&target).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600, "mode {mode:o}");
+}
+
 // ---- encrypt_stream ----
 
 #[test]

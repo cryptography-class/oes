@@ -30,7 +30,24 @@ impl AtomicFile {
     /// - [`ErrorKind::InvalidInput`] if `target` has no file name.
     /// - Any error from the random source or from creating the temporary file.
     pub fn create(target: impl Into<PathBuf>, overwrite: bool) -> io::Result<Self> {
-        let target = target.into();
+        Self::open(target.into(), overwrite, false)
+    }
+
+    /// Creates the temporary file for `target` like [`create`](Self::create), but
+    /// readable and writable only by its owner, for secrets such as keys.
+    ///
+    /// On Unix the file gets mode `0o600` from the start, and the rename keeps it.
+    /// Windows has no mode bits, so there the file takes the permissions of its
+    /// directory, as with `create`.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`create`](Self::create).
+    pub fn create_private(target: impl Into<PathBuf>, overwrite: bool) -> io::Result<Self> {
+        Self::open(target.into(), overwrite, true)
+    }
+
+    fn open(target: PathBuf, overwrite: bool, private: bool) -> io::Result<Self> {
         if !overwrite && target.exists() {
             return Err(already_exists(&target));
         }
@@ -49,7 +66,18 @@ impl AtomicFile {
         let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
         let tmp = dir.join(format!(".{}.{suffix}.tmp", name.to_string_lossy()));
 
-        let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            if private {
+                options.mode(0o600);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let file = options.open(&tmp)?;
         Ok(Self {
             file: Some(file),
             tmp,

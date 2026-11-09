@@ -69,15 +69,16 @@ impl Key {
         Ok(key)
     }
 
-    /// Saves the raw key bytes to `path`. The file gets the default permissions
-    /// of its directory, so keep it somewhere only you can read.
+    /// Saves the raw key bytes to `path`. On Unix only the owner can read or
+    /// write the file (mode `0o600`). Windows has no mode bits, so there the file
+    /// takes the permissions of its directory.
     ///
     /// # Errors
     ///
     /// [`KeyError::Io`] if `path` exists and `overwrite` is false, or if writing
     /// fails. No file appears at `path` on failure.
     pub fn save(&self, path: &Path, overwrite: bool) -> Result<(), KeyError> {
-        let mut file = AtomicFile::create(path, overwrite)?;
+        let mut file = AtomicFile::create_private(path, overwrite)?;
         file.write_all(&self.bytes)?;
         file.commit()?;
         Ok(())
