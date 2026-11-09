@@ -50,7 +50,8 @@ impl Header {
     /// # Errors
     ///
     /// [`ContainerError::InvalidCombination`] if ECB or CBC has no padding, CTR
-    /// has padding, or the IV length isn't [`Mode::iv_len`].
+    /// has padding, the padding doesn't allow the cipher's block size (PKCS#5
+    /// needs 8-byte blocks), or the IV length isn't [`Mode::iv_len`].
     pub fn validate(&self) -> Result<(), ContainerError> {
         let needs_padding = match self.mode {
             Mode::Ecb | Mode::Cbc => true,
@@ -63,6 +64,16 @@ impl Header {
         }
         if !needs_padding && self.padding.is_some() {
             return Err(ContainerError::InvalidCombination("CTR takes no padding"));
+        }
+        if let Some(padding) = self.padding {
+            if padding
+                .check_block_size(self.algorithm.block_size())
+                .is_err()
+            {
+                return Err(ContainerError::InvalidCombination(
+                    "the padding scheme doesn't fit the cipher's block size",
+                ));
+            }
         }
         if self.iv.len() != self.mode.iv_len(self.algorithm) {
             return Err(ContainerError::InvalidCombination(

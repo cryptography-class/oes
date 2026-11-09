@@ -24,6 +24,6 @@ pub use io_util::{ByteCounts, MAX_BUFFER_SIZE};
 pub use padded::{DEFAULT_BUFFER_SIZE, decrypt_stream, encrypt_stream};
 
 #[cfg(test)]
-mod test_util;
+pub(crate) mod test_util;
 #[cfg(test)]
 mod tests;
