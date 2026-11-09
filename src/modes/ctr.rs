@@ -1,5 +1,7 @@
+use rayon::prelude::*;
+
 use crate::ciphers::traits::BlockCipher;
-use crate::modes::blocks::{MAX_BLOCK_LEN, load_iv, xor_into};
+use crate::modes::blocks::{MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, load_iv, xor_into};
 use crate::modes::errors::ModeError;
 
 /// Counter mode (NIST SP 800-38A section 6.5): the cipher encrypts a sequence of
@@ -40,6 +42,7 @@ pub struct Ctr<C: BlockCipher> {
     counter: [u8; MAX_BLOCK_LEN],
     /// Whether the last chunk ended in a partial block, which ends the message.
     ended: bool,
+    parallel: bool,
 }
 
 impl<C: BlockCipher> Ctr<C> {
@@ -55,7 +58,19 @@ impl<C: BlockCipher> Ctr<C> {
             cipher,
             counter: load_iv::<C>(initial_counter)?,
             ended: false,
+            parallel: false,
         })
+    }
+
+    /// Sets whether to split the work between the threads of the current Rayon
+    /// pool, which is the global pool unless the call runs inside
+    /// `ThreadPool::install`.
+    ///
+    /// Each piece computes its own starting counter, so the output is the same
+    /// either way. Data of up to 1024 blocks always runs on the calling thread.
+    pub fn parallel(mut self, on: bool) -> Self {
+        self.parallel = on;
+        self
     }
 
     /// Encrypts or decrypts `data` in place and continues from the previous call.
@@ -74,6 +89,27 @@ impl<C: BlockCipher> Ctr<C> {
             return Err(ModeError::DataAfterPartialBlock);
         }
 
+        let chunk_len = PAR_CHUNK_BLOCKS * C::BLOCK_SIZE;
+        if self.parallel && data.len() > chunk_len {
+            let cipher = &self.cipher;
+            let first = &self.counter[..C::BLOCK_SIZE];
+            data.par_chunks_mut(chunk_len)
+                .enumerate()
+                .for_each(|(index, chunk)| {
+                    let mut counter = [0u8; MAX_BLOCK_LEN];
+                    let counter = &mut counter[..C::BLOCK_SIZE];
+                    counter.copy_from_slice(first);
+                    add(counter, (index * PAR_CHUNK_BLOCKS) as u64);
+                    apply_from(cipher, counter, chunk);
+                });
+            add(
+                &mut self.counter[..C::BLOCK_SIZE],
+                data.len().div_ceil(C::BLOCK_SIZE) as u64,
+            );
+            self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
+            return Ok(());
+        }
+
         let counter = &mut self.counter[..C::BLOCK_SIZE];
         let mut buffer = [0u8; MAX_BLOCK_LEN];
         let keystream = &mut buffer[..C::BLOCK_SIZE];
@@ -88,6 +124,32 @@ impl<C: BlockCipher> Ctr<C> {
 
         self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
         Ok(())
+    }
+}
+
+/// XORs the keystream that starts at `counter` into `data`, leaving `counter` one
+/// past the last block used. Used by the parallel path, one piece per call.
+fn apply_from<C: BlockCipher>(cipher: &C, counter: &mut [u8], data: &mut [u8]) {
+    let mut buffer = [0u8; MAX_BLOCK_LEN];
+    let keystream = &mut buffer[..C::BLOCK_SIZE];
+    for chunk in data.chunks_mut(C::BLOCK_SIZE) {
+        keystream.copy_from_slice(counter);
+        cipher.encrypt_bytes(keystream);
+        xor_into(chunk, keystream);
+        increment(counter);
+    }
+}
+
+/// Adds `n` to the big-endian `counter`, wrapping at its length.
+pub(super) fn add(counter: &mut [u8], n: u64) {
+    let mut carry = n;
+    for byte in counter.iter_mut().rev() {
+        if carry == 0 {
+            break;
+        }
+        let sum = u64::from(*byte) + (carry & 0xFF);
+        *byte = sum as u8;
+        carry = (carry >> 8) + (sum >> 8);
     }
 }
 

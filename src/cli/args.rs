@@ -65,6 +65,10 @@ pub struct EncryptArgs {
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
+    /// Number of threads for ECB, CBC decryption and CTR. CBC encryption always
+    /// uses one.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
+    pub threads: u16,
     /// After encrypting, decrypt the result and compare it with the input.
     #[arg(long)]
     pub verify: bool,
@@ -89,6 +93,10 @@ pub struct DecryptArgs {
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
+    /// Number of threads for ECB, CBC decryption and CTR. CBC encryption always
+    /// uses one.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
+    pub threads: u16,
     /// Replace the output file if it exists.
     #[arg(long)]
     pub force: bool,

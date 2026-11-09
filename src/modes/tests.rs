@@ -1,3 +1,5 @@
+use super::blocks::PAR_CHUNK_BLOCKS;
+use super::ctr::add;
 use super::errors::ModeError;
 use super::{BlockMode, Cbc, Ctr, Ecb};
 use crate::ciphers::des::DesCipher;
@@ -26,6 +28,25 @@ fn des() -> DesCipher {
 
 fn sample(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i.wrapping_mul(131) ^ (i >> 5)) as u8).collect()
+}
+
+/// One piece of parallel work, in blocks.
+const CHUNK: usize = PAR_CHUNK_BLOCKS;
+
+/// Thread counts for the parallel tests, including one thread and an odd count.
+const POOLS: [usize; 3] = [1, 2, 3];
+
+/// Lengths in blocks around the size of a piece: those of up to one piece stay on
+/// the calling thread, and the last one ends in half a piece.
+const PAR_BLOCKS: [usize; 6] = [0, 1, CHUNK - 1, CHUNK, CHUNK + 1, 2 * CHUNK + CHUNK / 2];
+
+/// Runs `f` inside a Rayon pool of `threads` threads.
+fn in_pool<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .unwrap()
+        .install(f)
 }
 
 // ---- Ecb ----
@@ -60,6 +81,30 @@ fn ecb_rejects_unaligned_input_and_keeps_the_data() {
     assert_eq!(ecb.encrypt(&mut data), expected);
     assert_eq!(ecb.decrypt(&mut data), expected);
     assert_eq!(data, [7; 9]);
+}
+
+#[test]
+fn ecb_parallel_matches_sequential() {
+    for blocks in PAR_BLOCKS {
+        let plaintext = sample(blocks * BLOCK);
+        let mut expected = plaintext.clone();
+        Ecb::new(des()).encrypt(&mut expected).unwrap();
+
+        for threads in POOLS {
+            let ecb = Ecb::new(des()).parallel(true);
+            let mut buffer = plaintext.clone();
+            in_pool(threads, || ecb.encrypt(&mut buffer)).unwrap();
+            assert_eq!(
+                buffer, expected,
+                "encrypt {blocks} blocks, {threads} threads"
+            );
+            in_pool(threads, || ecb.decrypt(&mut buffer)).unwrap();
+            assert_eq!(
+                buffer, plaintext,
+                "decrypt {blocks} blocks, {threads} threads"
+            );
+        }
+    }
 }
 
 // ---- Cbc ----
@@ -123,6 +168,64 @@ fn cbc_rejects_unaligned_input_and_keeps_the_data_and_chain() {
     let mut aligned = *PLAINTEXT;
     cbc.encrypt(&mut aligned).unwrap();
     assert_eq!(aligned, CBC_CIPHERTEXT);
+}
+
+#[test]
+fn cbc_parallel_decrypt_matches_sequential() {
+    for blocks in PAR_BLOCKS {
+        let plaintext = sample(blocks * BLOCK);
+        let mut ciphertext = plaintext.clone();
+        Cbc::new(des(), &IV)
+            .unwrap()
+            .encrypt(&mut ciphertext)
+            .unwrap();
+
+        for threads in POOLS {
+            let mut cbc = Cbc::new(des(), &IV).unwrap().parallel(true);
+            let mut buffer = ciphertext.clone();
+            in_pool(threads, || cbc.decrypt(&mut buffer)).unwrap();
+            assert_eq!(buffer, plaintext, "{blocks} blocks, {threads} threads");
+        }
+    }
+}
+
+/// The stream layer decrypts one buffer at a time, so the chain has to carry over
+/// from one parallel call to the next.
+#[test]
+fn cbc_parallel_decrypt_keeps_chaining_between_calls() {
+    let plaintext = sample((3 * CHUNK + 1) * BLOCK);
+    let mut ciphertext = plaintext.clone();
+    Cbc::new(des(), &IV)
+        .unwrap()
+        .encrypt(&mut ciphertext)
+        .unwrap();
+
+    for split in [1, CHUNK, CHUNK + 1, 2 * CHUNK + 3] {
+        let mut cbc = Cbc::new(des(), &IV).unwrap().parallel(true);
+        let mut buffer = ciphertext.clone();
+        let (first, second) = buffer.split_at_mut(split * BLOCK);
+        in_pool(2, || {
+            cbc.decrypt(first)?;
+            cbc.decrypt(second)
+        })
+        .unwrap();
+        assert_eq!(buffer, plaintext, "split at block {split}");
+    }
+}
+
+#[test]
+fn cbc_parallel_flag_leaves_encryption_unchanged() {
+    let plaintext = sample(3 * CHUNK * BLOCK);
+    let mut expected = plaintext.clone();
+    Cbc::new(des(), &IV)
+        .unwrap()
+        .encrypt(&mut expected)
+        .unwrap();
+
+    let mut cbc = Cbc::new(des(), &IV).unwrap().parallel(true);
+    let mut buffer = plaintext;
+    in_pool(2, || cbc.encrypt(&mut buffer)).unwrap();
+    assert_eq!(buffer, expected);
 }
 
 // ---- Ctr ----
@@ -210,6 +313,93 @@ fn ctr_rejects_data_after_a_partial_block_and_keeps_it() {
     let mut data = [7; 8];
     assert_eq!(ctr.apply_keystream(&mut data), Err(ModeError::DataAfterPartialBlock));
     assert_eq!(data, [7; 8]);
+}
+
+#[test]
+fn ctr_parallel_matches_sequential() {
+    // Whole blocks, then lengths that end in a partial block.
+    let lengths = PAR_BLOCKS
+        .map(|blocks| blocks * BLOCK)
+        .into_iter()
+        .chain([CHUNK * BLOCK + 3, (2 * CHUNK + 7) * BLOCK + 5]);
+    for len in lengths {
+        let plaintext = sample(len);
+        let mut expected = plaintext.clone();
+        Ctr::new(des(), &IV)
+            .unwrap()
+            .apply_keystream(&mut expected)
+            .unwrap();
+
+        for threads in POOLS {
+            let mut ctr = Ctr::new(des(), &IV).unwrap().parallel(true);
+            let mut buffer = plaintext.clone();
+            in_pool(threads, || ctr.apply_keystream(&mut buffer)).unwrap();
+            assert_eq!(buffer, expected, "length {len}, {threads} threads");
+        }
+    }
+}
+
+/// The second call has to start from the counter the parallel first call left.
+/// A partial last block still ends the message.
+#[test]
+fn ctr_parallel_keeps_the_counter_between_calls() {
+    let len = (3 * CHUNK + 2) * BLOCK + 3;
+    let plaintext = sample(len);
+    let mut expected = plaintext.clone();
+    Ctr::new(des(), &IV)
+        .unwrap()
+        .apply_keystream(&mut expected)
+        .unwrap();
+
+    for split in [CHUNK + 5, 2 * CHUNK] {
+        let mut ctr = Ctr::new(des(), &IV).unwrap().parallel(true);
+        let mut buffer = plaintext.clone();
+        let (first, second) = buffer.split_at_mut(split * BLOCK);
+        in_pool(2, || {
+            ctr.apply_keystream(first)?;
+            ctr.apply_keystream(second)
+        })
+        .unwrap();
+        assert_eq!(buffer, expected, "split at block {split}");
+        assert_eq!(
+            ctr.apply_keystream(&mut [0; 8]),
+            Err(ModeError::DataAfterPartialBlock),
+            "split at block {split}"
+        );
+    }
+}
+
+/// The counter wraps from `FF..FF` to zero in the middle of the second piece.
+#[test]
+fn ctr_parallel_counter_wraps_across_pieces() {
+    let start = (u64::MAX - (CHUNK + CHUNK / 2) as u64 + 1).to_be_bytes();
+    let plaintext = sample(3 * CHUNK * BLOCK);
+    let mut expected = plaintext.clone();
+    Ctr::new(des(), &start)
+        .unwrap()
+        .apply_keystream(&mut expected)
+        .unwrap();
+
+    let mut ctr = Ctr::new(des(), &start).unwrap().parallel(true);
+    let mut buffer = plaintext;
+    in_pool(3, || ctr.apply_keystream(&mut buffer)).unwrap();
+    assert_eq!(buffer, expected);
+}
+
+#[test]
+fn add_carries_and_wraps() {
+    let cases: [([u8; 4], u64, [u8; 4]); 5] = [
+        ([0, 0, 0, 0], 0, [0, 0, 0, 0]),
+        ([0, 0, 0, 0xFE], 1, [0, 0, 0, 0xFF]),
+        ([0, 0, 0xFF, 0xFF], 1, [0, 1, 0, 0]),
+        ([0, 0, 0x12, 0x34], 0x0102, [0, 0, 0x13, 0x36]),
+        ([0xFF, 0xFF, 0xFF, 0xF0], 0x1_0000_0020, [0, 0, 0, 0x10]),
+    ];
+    for (start, n, expected) in cases {
+        let mut counter = start;
+        add(&mut counter, n);
+        assert_eq!(counter, expected, "{start:02X?} + {n:#x}");
+    }
 }
 
 // ---- BlockMode ----

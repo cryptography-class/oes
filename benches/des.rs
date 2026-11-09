@@ -6,17 +6,24 @@
 //! Groups:
 //! - `des-block`: encryption and decryption of one block, and the key schedule.
 //! - `mode-encrypt` and `mode-decrypt`: ECB, CBC and CTR over each of the shared
-//!   input sizes, in place on one buffer.
+//!   input sizes, in place on one buffer. Lines ending in `-par` run the same mode
+//!   in parallel on a pool of every core. CBC encryption has no such line, since
+//!   it can't run in parallel.
+//! - `threads`: parallel ECB encryption of 10 MiB with a growing thread count,
+//!   which is the x axis of its chart.
 //!
 //! DES and ECB are insecure and must not be used to protect real data.
 
 mod common;
 
 use std::hint::black_box;
+use std::thread::available_parallelism;
 
 use common::{IV, KEY, SIZES, id, payload, set_size, size_group};
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
+use criterion::{
+    BatchSize, BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criterion_main,
+};
 use des::cipher::block_padding::NoPadding;
 use des::cipher::{
     BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit,
@@ -25,6 +32,7 @@ use des::cipher::{
 use oes::ciphers::des::DesCipher;
 use oes::ciphers::traits::{BlockCipher, KeyInit};
 use oes::modes::{Cbc, Ctr, Ecb};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 /// The block that the single-block benchmarks start from.
 const BLOCK: u64 = 0x0123_4567_89AB_CDEF;
@@ -94,8 +102,18 @@ fn bench_in_place<M>(
     });
 }
 
+/// Builds a Rayon pool of `threads` threads, or of one per core when `None`.
+fn pool(threads: Option<usize>) -> ThreadPool {
+    let mut builder = ThreadPoolBuilder::new();
+    if let Some(threads) = threads {
+        builder = builder.num_threads(threads);
+    }
+    builder.build().unwrap()
+}
+
 fn mode_encrypt(c: &mut Criterion) {
     let mut group = size_group(c, "mode-encrypt");
+    let pool = pool(None);
     for size in SIZES {
         let label = set_size(&mut group, size);
         let buf = &mut payload(size);
@@ -155,12 +173,30 @@ fn mode_encrypt(c: &mut Criterion) {
             || ctr::Ctr64BE::<des::Des>::new(&KEY.into(), &IV.into()),
             |mut mode, data| mode.apply_keystream(data),
         );
+
+        bench_in_place(
+            &mut group,
+            "ecb-par",
+            &label,
+            buf,
+            || Ecb::new(DesCipher::new(&KEY)).parallel(true),
+            |mode, data| pool.install(|| mode.encrypt(data)).unwrap(),
+        );
+        bench_in_place(
+            &mut group,
+            "ctr-par",
+            &label,
+            buf,
+            || Ctr::new(DesCipher::new(&KEY), &IV).unwrap().parallel(true),
+            |mut mode, data| pool.install(|| mode.apply_keystream(data)).unwrap(),
+        );
     }
     group.finish();
 }
 
 fn mode_decrypt(c: &mut Criterion) {
     let mut group = size_group(c, "mode-decrypt");
+    let pool = pool(None);
     for size in SIZES {
         let label = set_size(&mut group, size);
         let buf = &mut payload(size);
@@ -219,9 +255,58 @@ fn mode_decrypt(c: &mut Criterion) {
             || ctr::Ctr64BE::<des::Des>::new(&KEY.into(), &IV.into()),
             |mut mode, data| mode.apply_keystream(data),
         );
+
+        bench_in_place(
+            &mut group,
+            "ecb-par",
+            &label,
+            buf,
+            || Ecb::new(DesCipher::new(&KEY)).parallel(true),
+            |mode, data| pool.install(|| mode.decrypt(data)).unwrap(),
+        );
+        bench_in_place(
+            &mut group,
+            "cbc-par",
+            &label,
+            buf,
+            || Cbc::new(DesCipher::new(&KEY), &IV).unwrap().parallel(true),
+            |mut mode, data| pool.install(|| mode.decrypt(data)).unwrap(),
+        );
+        bench_in_place(
+            &mut group,
+            "ctr-par",
+            &label,
+            buf,
+            || Ctr::new(DesCipher::new(&KEY), &IV).unwrap().parallel(true),
+            |mut mode, data| pool.install(|| mode.apply_keystream(data)).unwrap(),
+        );
     }
     group.finish();
 }
 
-criterion_group!(benches, des_block, mode_encrypt, mode_decrypt);
+/// The thread counts of the `threads` group. Counts above the number of cores are
+/// skipped, so the chart depends on the machine.
+const THREAD_COUNTS: [usize; 7] = [1, 2, 4, 6, 8, 10, 12];
+
+fn threads(c: &mut Criterion) {
+    // No throughput: it would place every point at the same size, and the chart
+    // needs the thread count on its x axis instead.
+    let mut group = size_group(c, "threads");
+    let cores = available_parallelism().map_or(1, |n| n.get());
+    let buf = &mut payload(SIZES[1]);
+
+    for threads in THREAD_COUNTS.into_iter().filter(|&n| n <= cores) {
+        let pool = pool(Some(threads));
+        group.bench_function(BenchmarkId::new("ecb-encrypt", threads), |b| {
+            b.iter_batched(
+                || Ecb::new(DesCipher::new(&KEY)).parallel(true),
+                |mode| pool.install(|| mode.encrypt(black_box(&mut *buf))).unwrap(),
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, des_block, mode_encrypt, mode_decrypt, threads);
 criterion_main!(benches);

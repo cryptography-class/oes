@@ -470,6 +470,7 @@ dependencies = [
  "des",
  "ecb",
  "getrandom",
+ "rayon",
 ]
 
 [[package]]

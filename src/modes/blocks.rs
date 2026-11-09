@@ -4,6 +4,14 @@ use crate::modes::errors::ModeError;
 /// The largest block size supported, which sizes the buffers in the modes.
 pub(super) const MAX_BLOCK_LEN: usize = 16;
 
+/// The number of blocks in each piece of work when a mode runs in parallel: 8 KiB
+/// for DES, about a millisecond of work.
+///
+/// Pieces have a fixed size rather than one per thread, so the pool's
+/// work-stealing gives more of them to faster cores. Equal shares per thread would
+/// leave the fast cores idle while the slow ones finish.
+pub(super) const PAR_CHUNK_BLOCKS: usize = 1024;
+
 /// Copies a one-block IV or counter into a buffer, in its first block-sized bytes.
 pub(super) fn load_iv<C: BlockCipher>(iv: &[u8]) -> Result<[u8; MAX_BLOCK_LEN], ModeError> {
     const { assert!(C::BLOCK_SIZE <= MAX_BLOCK_LEN) };

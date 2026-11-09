@@ -1,5 +1,9 @@
+use rayon::prelude::*;
+
 use crate::ciphers::traits::BlockCipher;
-use crate::modes::blocks::{MAX_BLOCK_LEN, check_whole_blocks, load_iv, xor_into};
+use crate::modes::blocks::{
+    MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, check_whole_blocks, load_iv, xor_into,
+};
 use crate::modes::errors::ModeError;
 
 /// Cipher Block Chaining mode (NIST SP 800-38A section 6.2): each plaintext block
@@ -32,6 +36,7 @@ pub struct Cbc<C: BlockCipher> {
     /// The previous ciphertext block, which starts out as the IV, in its first
     /// block-sized bytes.
     prev: [u8; MAX_BLOCK_LEN],
+    parallel: bool,
 }
 
 impl<C: BlockCipher> Cbc<C> {
@@ -47,7 +52,20 @@ impl<C: BlockCipher> Cbc<C> {
         Ok(Self {
             cipher,
             prev: load_iv::<C>(iv)?,
+            parallel: false,
         })
+    }
+
+    /// Sets whether decryption splits its work between the threads of the current
+    /// Rayon pool, which is the global pool unless the call runs inside
+    /// `ThreadPool::install`.
+    ///
+    /// Encryption always runs on the calling thread, because each block needs the
+    /// ciphertext of the block before it. The output is the same either way. Data
+    /// of up to 1024 blocks always runs on the calling thread.
+    pub fn parallel(mut self, on: bool) -> Self {
+        self.parallel = on;
+        self
     }
 
     /// Encrypts `data` in place and continues the chain from the previous call.
@@ -88,18 +106,45 @@ impl<C: BlockCipher> Cbc<C> {
         let start = self.prev;
         self.prev[..block_size].copy_from_slice(&data[data.len() - block_size..]);
 
-        // Runs from the last block to the first, so each block's previous ciphertext
-        // is still in `data` and nothing has to be saved per block.
-        let mut end = data.len();
-        while end > block_size {
-            let (before, block) = data[..end].split_at_mut(end - block_size);
-            self.cipher.decrypt_bytes(block);
-            xor_into(block, &before[before.len() - block_size..]);
-            end -= block_size;
+        let chunk_len = PAR_CHUNK_BLOCKS * block_size;
+        if self.parallel && data.len() > chunk_len {
+            // Each piece starts from the last ciphertext block of the piece before
+            // it, which has to be saved before another thread decrypts it.
+            let starts: Vec<[u8; MAX_BLOCK_LEN]> = std::iter::once(start)
+                .chain(data.chunks(chunk_len).map(|chunk| {
+                    let mut block = [0u8; MAX_BLOCK_LEN];
+                    block[..block_size].copy_from_slice(&chunk[chunk.len() - block_size..]);
+                    block
+                }))
+                .collect();
+            let cipher = &self.cipher;
+            data.par_chunks_mut(chunk_len)
+                .zip(starts.par_iter())
+                .for_each(|(chunk, start)| decrypt_chain(cipher, chunk, &start[..block_size]));
+            return Ok(());
         }
-        let first = &mut data[..block_size];
-        self.cipher.decrypt_bytes(first);
-        xor_into(first, &start[..block_size]);
+
+        decrypt_chain(&self.cipher, data, &start[..block_size]);
         Ok(())
     }
+}
+
+/// Decrypts the non-empty, block-aligned `data` in place, chained from `start`,
+/// the ciphertext block before it.
+#[inline]
+fn decrypt_chain<C: BlockCipher>(cipher: &C, data: &mut [u8], start: &[u8]) {
+    let block_size = C::BLOCK_SIZE;
+
+    // Runs from the last block to the first, so each block's previous ciphertext is
+    // still in `data` and nothing has to be saved per block.
+    let mut end = data.len();
+    while end > block_size {
+        let (before, block) = data[..end].split_at_mut(end - block_size);
+        cipher.decrypt_bytes(block);
+        xor_into(block, &before[before.len() - block_size..]);
+        end -= block_size;
+    }
+    let first = &mut data[..block_size];
+    cipher.decrypt_bytes(first);
+    xor_into(first, start);
 }

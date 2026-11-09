@@ -11,6 +11,11 @@
 //!
 //! Modes keep their state between calls, so data can be processed chunk by chunk.
 //! Use a new instance for each encryption or decryption run.
+//!
+//! Each mode can split its work between the threads of a Rayon pool, with the
+//! same output as on one thread. This covers ECB, CTR and CBC decryption. CBC
+//! encryption always runs on one thread, because each block needs the ciphertext
+//! of the block before it.
 
 mod blocks;
 mod cbc;
