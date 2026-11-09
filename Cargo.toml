@@ -27,3 +27,7 @@ bench = false
 name = "oes"
 path = "src/main.rs"
 bench = false
+
+[[bench]]
+name = "des"
+harness = false
