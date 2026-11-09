@@ -31,3 +31,7 @@ bench = false
 [[bench]]
 name = "des"
 harness = false
+
+[[bench]]
+name = "stream"
+harness = false
