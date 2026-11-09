@@ -21,11 +21,10 @@ pub fn payload(len: usize) -> Vec<u8> {
 
 /// Starts a group whose benchmarks run at each of [`SIZES`].
 ///
-/// Ten samples is Criterion's minimum and gives more than five runs per benchmark.
-/// The sampling mode stays automatic, so Criterion keeps linear sampling for short
-/// runs and switches to flat sampling when one run takes seconds, as at 100 MiB.
-/// The summary charts use a log scale because the sizes span two orders of
-/// magnitude.
+/// Uses ten samples, Criterion's minimum, because a single run takes seconds at the
+/// largest size. The sampling mode stays automatic, so Criterion samples short
+/// runs linearly and switches to flat sampling for long ones. The summary charts
+/// use a log scale because the sizes span two orders of magnitude.
 pub fn size_group<'a>(c: &'a mut Criterion, name: &str) -> BenchmarkGroup<'a, WallTime> {
     let mut group = c.benchmark_group(name);
     group

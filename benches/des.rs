@@ -4,33 +4,9 @@
 //! prefixed with `rustcrypto-`.
 //!
 //! Groups:
-//! - `des-block`: one block encrypted and decrypted, and the key schedule. This is
-//!   the baseline for DES optimizations.
-//! - `mode-encrypt` and `mode-decrypt`: ECB, CBC and CTR over 1, 10 and 100 MiB,
-//!   with one line per implementation on the summary chart.
-//!
-//! Run with `cargo bench --bench des`, or one group with a filter such as
-//! `cargo bench --bench des -- mode-encrypt/cbc`. To keep a baseline and compare
-//! against it later:
-//!
-//! ```text
-//! cargo bench -- --save-baseline before-des-opt
-//! cargo bench -- --baseline before-des-opt
-//! ```
-//!
-//! The report is `target/criterion/report/index.html`. Each size group's page has
-//! a line chart of time against input size and a throughput chart, and each
-//! benchmark's page shows its distribution, overlaid with the baseline once one
-//! exists.
-//!
-//! Windows throttles background processes, and a child process doesn't inherit
-//! Above Normal priority from `start`. For reliable measurements, build with
-//! `cargo bench --no-run`, which prints the bench executable's path, and run that
-//! executable from the repository root:
-//!
-//! ```text
-//! start /abovenormal /wait /b target\release\deps\des-<hash>.exe --bench --save-baseline <name>
-//! ```
+//! - `des-block`: encryption and decryption of one block, and the key schedule.
+//! - `mode-encrypt` and `mode-decrypt`: ECB, CBC and CTR over each of the shared
+//!   input sizes, in place on one buffer.
 //!
 //! DES and ECB are insecure and must not be used to protect real data.
 

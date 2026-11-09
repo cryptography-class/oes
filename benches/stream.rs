@@ -1,27 +1,22 @@
 //! Benchmarks of file encryption and decryption through the stream layer, and of
 //! the file reads and writes it performs, without the cipher.
 //!
-//! Groups, each over 1, 10 and 100 MiB with the default 1 MiB buffer:
+//! Groups, over each of the shared input sizes with the default 1 MiB buffer
+//! unless stated otherwise:
 //! - `io`: `read` reads a file through the buffer and discards it, and `write`
 //!   writes the bytes through [`AtomicFile`] and commits. This is the I/O time.
 //! - `file-encrypt` and `file-decrypt`: ECB and CBC with PKCS#7, and CTR, from one
 //!   file to another the same way the `oes` binary does it. This is the total
 //!   time. The container header is not written, since at a few dozen bytes it has
 //!   no measurable cost.
+//! - `buffer-size`: CBC file encryption and decryption of a fixed 10 MiB file with
+//!   buffers from 4 KiB to 8 MiB. The buffer size in KiB is the benchmark
+//!   parameter, and no throughput is set.
 //!
-//! One more group fixes the file at 10 MiB and varies the buffer instead:
-//! - `buffer-size`: CBC file encryption and decryption with buffers from 4 KiB to
-//!   8 MiB. Its chart has the buffer size in KiB along the x axis, labelled only
-//!   "Input", and time on the y axis; with the file size fixed, a lower time means
-//!   a higher throughput. Criterion draws no throughput chart for this group,
-//!   because it would place every point at the same file size.
-//!
-//! All files sit in a temporary directory that is removed afterwards. The input
-//! stays in the operating system's file cache after the first run, and nothing is
-//! flushed to disk, so these numbers measure the file cache rather than the drive.
-//!
-//! Running, filtering, baselines, raised priority and the report work as described
-//! in `benches/des.rs`. The bench executable here is `stream-<hash>.exe`.
+//! All files are in a temporary directory that is removed afterwards. Input reads
+//! can be served from the operating system's file cache. Every output file is
+//! synced to the drive on commit, as in the `oes` binary, so the write, file
+//! encryption, file decryption and buffer-size timings include the sync.
 //!
 //! DES and ECB are insecure and must not be used to protect real data.
 
