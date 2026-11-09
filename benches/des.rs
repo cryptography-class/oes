@@ -284,7 +284,8 @@ fn mode_decrypt(c: &mut Criterion) {
     group.finish();
 }
 
-/// The thread counts of the `threads` group, up to the number of cores.
+/// The thread counts of the `threads` group. Counts above the number of cores are
+/// skipped, so the chart depends on the machine.
 const THREAD_COUNTS: [usize; 7] = [1, 2, 4, 6, 8, 10, 12];
 
 fn threads(c: &mut Criterion) {
