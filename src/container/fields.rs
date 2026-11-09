@@ -78,6 +78,13 @@ impl Algorithm {
         }
     }
 
+    /// Returns the key length in bytes, including DES parity bits.
+    pub fn key_len(self) -> usize {
+        match self {
+            Self::Des => 8,
+        }
+    }
+
     pub(super) fn to_byte(self) -> u8 {
         match self {
             Self::Des => 1,
