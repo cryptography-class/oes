@@ -80,8 +80,9 @@ fn pc2_matches_the_pc2_table_for_each_input_bit() {
 }
 
 // `pc2` multiplies, which only moves bits like a permutation as long as its
-// additions never carry into the bits it keeps. A carry needs at least two set
-// input bits, so every pair of bits is checked too.
+// additions never carry into the bits it keeps. Its doc comment explains why they
+// can't with these constants. The two tests below guard that: every pair of input
+// bits, and dense inputs, where a carry could chain through three or more bits.
 #[test]
 fn pc2_matches_the_pc2_table_for_each_pair_of_input_bits() {
     for high in 1..56 {
@@ -93,6 +94,19 @@ fn pc2_matches_the_pc2_table_for_each_pair_of_input_bits() {
                 "input bits {high} and {low}"
             );
         }
+    }
+}
+
+#[test]
+fn pc2_matches_the_pc2_table_for_dense_inputs() {
+    // A fixed xorshift64 sequence: deterministic inputs with about half the bits set.
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    for _ in 0..10_000 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let cd = state & ((1 << 56) - 1);
+        assert_eq!(pc2(cd), permute(cd, &PC_2, 56), "input {cd:#016x}");
     }
 }
 
