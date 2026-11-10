@@ -8,6 +8,8 @@
 //!
 //! - `key_schedule` derives the 16 round keys.
 //! - `round` runs the 16 Feistel rounds.
+//! - `permutations` computes some of the specification's permutations with
+//!   shifts and masks, in place of reading their tables bit by bit.
 //! - `tables` holds the permutations and S-boxes from the specification.
 //! - [`parity`] checks and sets the key's parity bits.
 //!
@@ -15,6 +17,7 @@
 
 pub mod cipher;
 mod key_schedule;
+mod permutations;
 mod round;
 mod tables;
 pub mod parity;

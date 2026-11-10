@@ -1,7 +1,8 @@
 use crate::bits::permute;
+use crate::ciphers::des::permutations::expand;
 use crate::ciphers::des::tables::{
-    E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5,
-    SBOX_6, SBOX_7, SBOX_8,
+    FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5, SBOX_6, SBOX_7,
+    SBOX_8,
 };
 
 /// Computes the cipher function f of FIPS 46-3 for one round.
@@ -10,8 +11,7 @@ use crate::ciphers::des::tables::{
 /// 6-bit group through its S-box to get 32 bits, then applies the P permutation.
 #[inline]
 pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
-    let expanded = permute(right as u64, &E_BOX_EXPANSION, 32);
-    let mixed = expanded ^ round_key;
+    let mixed = expand(right) ^ round_key;
 
     let s_boxes = [
         &SBOX_1, &SBOX_2, &SBOX_3, &SBOX_4, &SBOX_5, &SBOX_6, &SBOX_7, &SBOX_8,
