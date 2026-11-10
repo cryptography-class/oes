@@ -1,8 +1,9 @@
 use super::DesCipher;
-use super::permutations::expand;
+use super::permutations::{expand, final_permutation, initial_permutation};
 use super::sp_tables::SP_TABLES;
 use super::tables::{
-    E_BOX_EXPANSION, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5, SBOX_6, SBOX_7, SBOX_8,
+    E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5,
+    SBOX_6, SBOX_7, SBOX_8,
 };
 use crate::bits::permute;
 use crate::ciphers::traits::{BlockCipher, KeyInit};
@@ -37,11 +38,37 @@ fn des_decrypt_known_vector() {
     assert_eq!(block, expected);
 }
 
+// The permutation tests below rely on linearity. A permutation table and its fast
+// version only move bits around, so each is linear over XOR: the output for any
+// input is the XOR of the outputs for its set bits. Matching on zero and on every
+// single-bit input therefore covers every possible input.
+
+// ---- initial_permutation ----
+
+#[test]
+fn initial_permutation_matches_the_ip_table_for_each_input_bit() {
+    assert_eq!(initial_permutation(0), 0);
+    for bit in 0..64 {
+        let block = 1u64 << bit;
+        let expected = permute(block, &INITIAL_PERM, 64);
+        assert_eq!(initial_permutation(block), expected, "input bit {bit}");
+    }
+}
+
+// ---- final_permutation ----
+
+#[test]
+fn final_permutation_matches_the_fp_table_for_each_input_bit() {
+    assert_eq!(final_permutation(0), 0);
+    for bit in 0..64 {
+        let block = 1u64 << bit;
+        let expected = permute(block, &FINAL_PERM, 64);
+        assert_eq!(final_permutation(block), expected, "input bit {bit}");
+    }
+}
+
 // ---- expand ----
 
-// Both E and `expand` only move bits around, so each is linear over XOR: the
-// output for any input is the XOR of the outputs for its set bits. Matching on
-// zero and on every single-bit input therefore covers all 2^32 inputs.
 #[test]
 fn expand_matches_the_e_table_for_each_input_bit() {
     assert_eq!(expand(0), 0);

@@ -1,7 +1,5 @@
-use crate::bits::permute;
-use crate::ciphers::des::permutations::expand;
+use crate::ciphers::des::permutations::{expand, final_permutation, initial_permutation};
 use crate::ciphers::des::sp_tables::SP_TABLES;
-use crate::ciphers::des::tables::{FINAL_PERM, INITIAL_PERM};
 
 /// Computes the cipher function f of FIPS 46-3 for one round.
 ///
@@ -25,7 +23,7 @@ pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
 /// Decryption is the same process with the round keys in reverse order, which is
 /// what the Feistel structure allows.
 pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16], decrypt: bool) {
-    let value = permute(*block, &INITIAL_PERM, 64);
+    let value = initial_permutation(*block);
 
     let mut left = (value >> 32) as u32;
     let mut right = value as u32;
@@ -43,5 +41,5 @@ pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16], decrypt: bool) {
     // The specification doesn't swap after the last round, so undo the loop's swap.
     let preoutput = ((right as u64) << 32) | (left as u64);
 
-    *block = permute(preoutput, &FINAL_PERM, 64);
+    *block = final_permutation(preoutput);
 }

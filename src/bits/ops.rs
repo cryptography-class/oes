@@ -115,3 +115,43 @@ pub fn permute<const N: usize>(value: u64, table: &[u64; N], in_bits: u64) -> u6
 pub fn rotl28(value: u32, shift: u32) -> u32 {
     (value << shift | value >> (28 - shift)) & 0x0FFF_FFFF
 }
+
+/// Swaps each bit of `value` selected by `mask` with the bit `delta` places above it.
+///
+/// For every set bit of `mask` at shift `s`, bits `s` and `s + delta` of `value`
+/// trade places, and all other bits stay put. All pairs move at once, in six
+/// operations, so a fixed permutation such as the DES initial permutation can be
+/// done as a short series of these swaps instead of one bit at a time.
+///
+/// Unlike the other helpers in this module, it counts bits from the right,
+/// starting at 0, as Rust's shift operators do.
+///
+/// # Arguments
+///
+/// * `value` - The 64-bit value whose bits are swapped.
+/// * `delta` - The distance between the two bits of each pair, in `1..64`.
+/// * `mask` - The lower bit of each pair. The pairs must not overlap, so no bit
+///   may be set in both `mask` and `mask << delta`, and `mask << delta` must not
+///   lose bits off the top. This isn't checked: otherwise the result is not a
+///   rearrangement of `value`.
+///
+/// # Panics
+///
+/// In debug builds, panics if `delta` is 64 or more. Release builds don't check,
+/// and the result is meaningless.
+///
+/// # Examples
+///
+/// ```
+/// use oes::bits::delta_swap;
+///
+/// // Swap the two halves of a byte: the mask picks the low half, and each of its
+/// // bits trades places with the bit 4 above it.
+/// assert_eq!(delta_swap(0x3C, 4, 0x0F), 0xC3);
+/// ```
+#[inline(always)]
+pub fn delta_swap(value: u64, delta: u32, mask: u64) -> u64 {
+    // Where the two bits of a pair differ, flipping both swaps them.
+    let differ = (value ^ (value >> delta)) & mask;
+    value ^ differ ^ (differ << delta)
+}

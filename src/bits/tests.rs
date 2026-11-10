@@ -6,7 +6,7 @@
 //! - Inputs and outputs: J. Orlin Grabbe, "The DES Algorithm Illustrated", the
 //!   worked example with key 133457799BBCDFF1 and message 0123456789ABCDEF.
 
-use super::{get_bit, permute, rotl28};
+use super::{delta_swap, get_bit, permute, rotl28};
 
 const IP: [u64; 64] = [
     58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4, 62, 54, 46, 38, 30, 22, 14, 6,
@@ -220,4 +220,26 @@ fn rotl28_known_answer_key_schedule() {
 #[should_panic(expected = "attempt to subtract with overflow")]
 fn rotl28_shift_past_28_panics_in_debug() {
     rotl28(1, 29);
+}
+
+// ---- delta_swap ----
+
+#[test]
+fn delta_swap_exchanges_each_masked_bit_with_the_bit_delta_above() {
+    // Pairs (0, 4) and (1, 5): bit 1 moves up to bit 5, pair (0, 4) holds two
+    // zeros, and bit 2 is in no pair, so it stays.
+    assert_eq!(delta_swap(0b0000_0110, 4, 0b0000_0011), 0b0010_0100);
+}
+
+#[test]
+fn delta_swap_by_63_exchanges_the_lowest_and_highest_bits() {
+    assert_eq!(delta_swap(1, 63, 1), 1 << 63);
+    assert_eq!(delta_swap(1 << 63, 63, 1), 1);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "attempt to shift right with overflow")]
+fn delta_swap_delta_of_64_panics_in_debug() {
+    delta_swap(1, 64, 1);
 }
