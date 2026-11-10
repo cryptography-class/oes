@@ -13,6 +13,7 @@ mod fields;
 mod header;
 
 pub use fields::{Algorithm, ImageType, Mode};
+pub(crate) use fields::{padding_from_byte, padding_to_byte};
 pub use header::Header;
 
 #[cfg(test)]

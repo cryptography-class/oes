@@ -85,13 +85,13 @@ impl Algorithm {
         }
     }
 
-    pub(super) fn to_byte(self) -> u8 {
+    pub(crate) fn to_byte(self) -> u8 {
         match self {
             Self::Des => 1,
         }
     }
 
-    pub(super) fn from_byte(value: u8) -> Result<Self, ContainerError> {
+    pub(crate) fn from_byte(value: u8) -> Result<Self, ContainerError> {
         match value {
             1 => Ok(Self::Des),
             _ => Err(ContainerError::UnknownCode {
@@ -121,7 +121,7 @@ impl Mode {
         }
     }
 
-    pub(super) fn to_byte(self) -> u8 {
+    pub(crate) fn to_byte(self) -> u8 {
         match self {
             Self::Ecb => 1,
             Self::Cbc => 2,
@@ -129,7 +129,7 @@ impl Mode {
         }
     }
 
-    pub(super) fn from_byte(value: u8) -> Result<Self, ContainerError> {
+    pub(crate) fn from_byte(value: u8) -> Result<Self, ContainerError> {
         match value {
             1 => Ok(Self::Ecb),
             2 => Ok(Self::Cbc),
@@ -143,7 +143,7 @@ impl Mode {
 }
 
 /// Encodes the padding field, where 0 means no padding.
-pub(super) fn padding_to_byte(padding: Option<Padding>) -> u8 {
+pub(crate) fn padding_to_byte(padding: Option<Padding>) -> u8 {
     match padding {
         None => 0,
         Some(Padding::Pkcs7) => 1,
@@ -153,7 +153,7 @@ pub(super) fn padding_to_byte(padding: Option<Padding>) -> u8 {
     }
 }
 
-pub(super) fn padding_from_byte(value: u8) -> Result<Option<Padding>, ContainerError> {
+pub(crate) fn padding_from_byte(value: u8) -> Result<Option<Padding>, ContainerError> {
     match value {
         0 => Ok(None),
         1 => Ok(Some(Padding::Pkcs7)),

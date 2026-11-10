@@ -16,8 +16,9 @@ use oes::stream::{AtomicFile, ByteCounts, apply_ctr_stream, decrypt_stream, encr
 
 use super::args::{Cli, Command, DecryptArgs, EncryptArgs, KeygenArgs};
 use super::memory::peak_heap_bytes;
+use super::pixel::{pixel_decrypt, pixel_encrypt};
 
-type CliResult<T> = Result<T, Box<dyn Error>>;
+pub(super) type CliResult<T> = Result<T, Box<dyn Error>>;
 
 const MIB: f64 = 1024.0 * 1024.0;
 
@@ -27,6 +28,8 @@ pub fn run(cli: Cli) -> CliResult<()> {
         Command::Keygen(args) => keygen(&args),
         Command::Encrypt(args) => encrypt(&args),
         Command::Decrypt(args) => decrypt(&args),
+        Command::PixelEncrypt(args) => pixel_encrypt(&args),
+        Command::PixelDecrypt(args) => pixel_decrypt(&args),
     }
 }
 
@@ -109,7 +112,10 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
                 ),
             ),
             ("Output", file_with_size(&args.output)?),
-            ("Cipher", cipher_name(&header)),
+            (
+                "Cipher",
+                cipher_name(header.algorithm, header.mode, header.padding),
+            ),
             ("Buffer", format!("{buffer_size} bytes")),
             ("Threads", args.threads.to_string()),
             ("Time", seconds(elapsed)),
@@ -154,7 +160,10 @@ fn decrypt(args: &DecryptArgs) -> CliResult<()> {
                     header.original_len
                 ),
             ),
-            ("Cipher", cipher_name(&header)),
+            (
+                "Cipher",
+                cipher_name(header.algorithm, header.mode, header.padding),
+            ),
             ("Buffer", format!("{buffer_size} bytes")),
             ("Threads", args.threads.to_string()),
             ("Time", seconds(elapsed)),
@@ -393,18 +402,18 @@ fn read_up_to(reader: &mut File, buf: &mut [u8]) -> io::Result<usize> {
     Ok(filled)
 }
 
-fn with_path(path: &Path, e: io::Error) -> io::Error {
+pub(super) fn with_path(path: &Path, e: io::Error) -> io::Error {
     io::Error::new(e.kind(), format!("{}: {e}", path.display()))
 }
 
-fn print_table(title: &str, rows: &[(&str, String)]) {
+pub(super) fn print_table(title: &str, rows: &[(&str, String)]) {
     println!("{title}");
     for (name, value) in rows {
         println!("  {name:<11} {value}");
     }
 }
 
-fn file_with_size(path: &Path) -> CliResult<String> {
+pub(super) fn file_with_size(path: &Path) -> CliResult<String> {
     let len = fs::metadata(path)?.len();
     Ok(format!("{} ({len} bytes)", path.display()))
 }
@@ -415,23 +424,23 @@ fn algorithm_name(algorithm: Algorithm) -> &'static str {
     }
 }
 
-fn cipher_name(header: &Header) -> String {
-    let mode = match header.mode {
+pub(super) fn cipher_name(algorithm: Algorithm, mode: Mode, padding: Option<Padding>) -> String {
+    let mode = match mode {
         Mode::Ecb => "ECB",
         Mode::Cbc => "CBC",
         Mode::Ctr => "CTR",
     };
-    let padding = match header.padding {
+    let padding = match padding {
         None => "no padding",
         Some(Padding::Pkcs7) => "PKCS#7",
         Some(Padding::Pkcs5) => "PKCS#5",
         Some(Padding::AnsiX923(Fill::Zeros)) => "ANSI X9.23 with zeros",
         Some(Padding::AnsiX923(Fill::Random)) => "ANSI X9.23 with random bytes",
     };
-    format!("{} {mode}, {padding}", algorithm_name(header.algorithm))
+    format!("{} {mode}, {padding}", algorithm_name(algorithm))
 }
 
-fn seconds(elapsed: Duration) -> String {
+pub(super) fn seconds(elapsed: Duration) -> String {
     format!("{:.3} s", elapsed.as_secs_f64())
 }
 

@@ -219,3 +219,52 @@ fn decrypt_of_a_truncated_container_fails_without_output() {
         );
     }
 }
+
+// ---- pixel-encrypt and pixel-decrypt ----
+
+#[test]
+fn pixel_round_trip_restores_the_image_for_ecb_and_cbc() {
+    // 7x5 pixels are 105 bytes, so the last block is partial.
+    let picture = image::RgbImage::from_fn(7, 5, |x, y| {
+        image::Rgb([(x * 37) as u8, (y * 91) as u8, (x * y + 11) as u8])
+    });
+    for algorithm in ALGORITHMS {
+        let setup = Setup::new("cli-pixels", algorithm);
+        for mode in ["ecb", "cbc"] {
+            for extension in ["png", "bmp"] {
+                let context = format!("{algorithm} {mode}, {extension}");
+                let input = setup.path(&format!("in.{extension}"));
+                let encrypted = setup.path(&format!("enc.{extension}"));
+                let restored = setup.path(&format!("restored.{extension}"));
+                picture.save(&input).unwrap();
+
+                let mut args = vec![OsStr::new("pixel-encrypt"), OsStr::new("-i")];
+                args.extend([input.as_os_str(), OsStr::new("-o"), encrypted.as_os_str()]);
+                args.extend([OsStr::new("-k"), setup.key.as_os_str()]);
+                args.extend(["-a", algorithm, "-m", mode, "--force"].map(OsStr::new));
+                assert_success(&oes(args), &context);
+                let encrypted_image = image::open(&encrypted).unwrap().to_rgb8();
+                assert_eq!(encrypted_image.dimensions(), (7, 5), "{context}");
+                assert_ne!(encrypted_image, picture, "{context}");
+
+                let mut args = vec![OsStr::new("pixel-decrypt"), OsStr::new("-i")];
+                args.extend([
+                    encrypted.as_os_str(),
+                    OsStr::new("-o"),
+                    restored.as_os_str(),
+                ]);
+                args.extend([
+                    OsStr::new("-k"),
+                    setup.key.as_os_str(),
+                    OsStr::new("--force"),
+                ]);
+                assert_success(&oes(args), &context);
+                assert_eq!(
+                    image::open(&restored).unwrap().to_rgb8(),
+                    picture,
+                    "{context}"
+                );
+            }
+        }
+    }
+}

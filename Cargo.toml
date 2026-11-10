@@ -7,6 +7,8 @@ rust-version = "1.87"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 getrandom = "0.2"
+# Decodes and encodes PNG and BMP for the pixel encryption demo.
+image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
 rayon = "1.12"
 
 # Used only by benchmarks and the library comparison tests, never by the
