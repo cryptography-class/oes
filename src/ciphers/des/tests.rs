@@ -1,11 +1,11 @@
 use super::DesCipher;
-use super::key_schedule::split_round_key;
+use super::key_schedule::{generate_round_keys, pc1, pc2, split_round_key};
 use super::permutations::{final_permutation, initial_permutation};
 use super::round::mix_key;
 use super::sp_tables::SP_TABLES;
 use super::tables::{
-    E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5,
-    SBOX_6, SBOX_7, SBOX_8,
+    E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, PC_1, PC_2, SBOX_1, SBOX_2, SBOX_3,
+    SBOX_4, SBOX_5, SBOX_6, SBOX_7, SBOX_8,
 };
 use crate::bits::permute;
 use crate::ciphers::traits::{BlockCipher, KeyInit};
@@ -40,10 +40,61 @@ fn des_decrypt_known_vector() {
     assert_eq!(block, expected);
 }
 
+// ---- generate_round_keys ----
+
+// J. Orlin Grabbe, "The DES Algorithm Illustrated": key 133457799BBCDFF1 gives
+// K1 = 000110 110000 001011 101111 111111 000111 000001 110010 and
+// K16 = 110010 110011 110110 001011 000011 100001 011111 110101.
+#[test]
+fn generate_round_keys_known_answer_grabbe() {
+    let keys = generate_round_keys(&[0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]);
+    assert_eq!(keys[0], 0x1B02_EFFC_7072);
+    assert_eq!(keys[15], 0xCB3D_8B0E_17F5);
+}
+
 // The permutation tests below rely on linearity. A permutation table and its fast
 // version only move bits around, so each is linear over XOR: the output for any
 // input is the XOR of the outputs for its set bits. Matching on zero and on every
 // single-bit input therefore covers every possible input.
+
+// ---- pc1 ----
+
+#[test]
+fn pc1_matches_the_pc1_table_for_each_input_bit() {
+    assert_eq!(pc1(0), 0);
+    for bit in 0..64 {
+        let key = 1u64 << bit;
+        assert_eq!(pc1(key), permute(key, &PC_1, 64), "input bit {bit}");
+    }
+}
+
+// ---- pc2 ----
+
+#[test]
+fn pc2_matches_the_pc2_table_for_each_input_bit() {
+    assert_eq!(pc2(0), 0);
+    for bit in 0..56 {
+        let cd = 1u64 << bit;
+        assert_eq!(pc2(cd), permute(cd, &PC_2, 56), "input bit {bit}");
+    }
+}
+
+// `pc2` multiplies, which only moves bits like a permutation as long as its
+// additions never carry into the bits it keeps. A carry needs at least two set
+// input bits, so every pair of bits is checked too.
+#[test]
+fn pc2_matches_the_pc2_table_for_each_pair_of_input_bits() {
+    for high in 1..56 {
+        for low in 0..high {
+            let cd = (1u64 << high) | (1u64 << low);
+            assert_eq!(
+                pc2(cd),
+                permute(cd, &PC_2, 56),
+                "input bits {high} and {low}"
+            );
+        }
+    }
+}
 
 // ---- initial_permutation ----
 

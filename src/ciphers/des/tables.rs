@@ -4,10 +4,10 @@
 //! `bits::permute` reads them. S-boxes are indexed `[row][column]`, where the first
 //! and last of the 6 input bits form the row and the middle four form the column.
 //!
-//! These tables define DES, but the rounds don't read them as they run. IP, IP^-1
-//! and E are computed with shifts and swaps, which tests check against the tables
-//! here. The S-boxes and P are read once, at compile time, to build `sp_tables`.
-//! The key schedule reads PC-1 and PC-2 through `bits::permute`.
+//! These tables define DES, but the cipher doesn't read them as it runs. IP,
+//! IP^-1, E, PC-1 and PC-2 are computed with shifts, swaps and masks, which tests
+//! check against the tables here. The S-boxes and P are read once, at compile
+//! time, to build `sp_tables`.
 
 /// The initial permutation IP, applied to the block before the first round.
 #[cfg_attr(
@@ -57,6 +57,13 @@ pub const P_BOX_PERM: [u64; 32] = [
 ];
 
 /// Permuted choice 1, selecting the 56 non-parity key bits: 28 for C, then 28 for D.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests read it: the key schedule applies PC-1 with delta swaps"
+    )
+)]
 pub const PC_1: [u64; 56] = [
     57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35, 27, 19, 11, 3, 60,
     52, 44, 36, 63, 55, 47, 39, 31, 23, 15, 7, 62, 54, 46, 38, 30, 22, 14, 6, 61, 53, 45, 37, 29,
@@ -64,6 +71,13 @@ pub const PC_1: [u64; 56] = [
 ];
 
 /// Permuted choice 2, selecting the 48 bits of a round key from C and D.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only tests read it: the key schedule applies PC-2 with masks and shifts"
+    )
+)]
 pub const PC_2: [u64; 48] = [
     14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10, 23, 19, 12, 4, 26, 8, 16, 7, 27, 20, 13, 2, 41, 52,
     31, 37, 47, 55, 30, 40, 51, 45, 33, 48, 44, 49, 39, 56, 34, 53, 46, 42, 50, 36, 29, 32,
