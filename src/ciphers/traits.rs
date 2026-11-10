@@ -55,6 +55,44 @@ pub trait BlockCipher: Sync {
         self.decrypt_block(&mut block);
         block.write_bytes(bytes);
     }
+
+    /// Encrypts a whole number of blocks held as bytes, in place, each on its own.
+    ///
+    /// The default runs [`encrypt_bytes`](Self::encrypt_bytes) on each block. A
+    /// cipher can override it to work on several independent blocks at once, as
+    /// long as the output stays the same.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `data` isn't a multiple of the block size.
+    fn encrypt_blocks(&self, data: &mut [u8]) {
+        assert!(
+            data.len().is_multiple_of(Self::BLOCK_SIZE),
+            "data isn't a whole number of blocks"
+        );
+        for block in data.chunks_exact_mut(Self::BLOCK_SIZE) {
+            self.encrypt_bytes(block);
+        }
+    }
+
+    /// Decrypts a whole number of blocks held as bytes, in place, each on its own.
+    ///
+    /// The default runs [`decrypt_bytes`](Self::decrypt_bytes) on each block. A
+    /// cipher can override it to work on several independent blocks at once, as
+    /// long as the output stays the same.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `data` isn't a multiple of the block size.
+    fn decrypt_blocks(&self, data: &mut [u8]) {
+        assert!(
+            data.len().is_multiple_of(Self::BLOCK_SIZE),
+            "data isn't a whole number of blocks"
+        );
+        for block in data.chunks_exact_mut(Self::BLOCK_SIZE) {
+            self.decrypt_bytes(block);
+        }
+    }
 }
 
 /// A block cipher that can be built from a `KEY_SIZE`-byte key.

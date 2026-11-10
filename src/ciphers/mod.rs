@@ -3,3 +3,6 @@
 pub mod des;
 // pub mod aes;
 pub mod traits;
+
+#[cfg(test)]
+mod tests;
