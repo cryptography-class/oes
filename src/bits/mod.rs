@@ -10,13 +10,16 @@
 //! shift to reach the bit   7  6  5  4  3  2  1  0
 //! ```
 //!
+//! `delta_swap` is the exception: it moves many bits at once, selected by a mask,
+//! so it counts from the right as the shift operators do.
+//!
 //! The helpers don't validate their arguments. They are meant for fixed tables,
 //! not for external input. Each function's `# Panics` section says what happens
 //! when an argument is out of range.
 
 mod ops;
 
-pub use ops::{get_bit, permute, rotl28};
+pub use ops::{delta_swap, get_bit, permute, rotl28};
 
 #[cfg(test)]
 mod tests;

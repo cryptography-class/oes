@@ -8,6 +8,10 @@
 //!
 //! - `key_schedule` derives the 16 round keys.
 //! - `round` runs the 16 Feistel rounds.
+//! - `permutations` applies the initial and final permutations with delta swaps,
+//!   in place of reading their tables bit by bit.
+//! - `sp_tables` merges each S-box with the permutation P into one lookup table,
+//!   built at compile time.
 //! - `tables` holds the permutations and S-boxes from the specification.
 //! - [`parity`] checks and sets the key's parity bits.
 //!
@@ -15,7 +19,9 @@
 
 pub mod cipher;
 mod key_schedule;
+mod permutations;
 mod round;
+mod sp_tables;
 mod tables;
 pub mod parity;
 

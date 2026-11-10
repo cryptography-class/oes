@@ -1,63 +1,75 @@
-use crate::bits::permute;
-use crate::ciphers::des::tables::{
-    E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5,
-    SBOX_6, SBOX_7, SBOX_8,
-};
+use crate::ciphers::des::permutations::{final_permutation, initial_permutation};
+use crate::ciphers::des::sp_tables::SP_TABLES;
+
+/// Computes the expansion E of a 32-bit half XORed with a round key, as the eight
+/// 6-bit S-box inputs of FIPS 46-3, without building the 48-bit value.
+///
+/// E's output group `j` (0 to 7, from the left) is the six consecutive bits `4j` to
+/// `4j + 5` of `right`, where bit 0 stands for bit 32. Rotating `right` right by
+/// `27 - 4j` would bring that group to the bottom. One rotation lines up four
+/// groups at once, one per byte, because the rotations they need differ by 8:
+///
+/// ```text
+/// word   rotation          byte 3    byte 2    byte 1    byte 0
+/// even   right by 3        group 0   group 2   group 4   group 6
+/// odd    left by 1         group 1   group 3   group 5   group 7
+/// ```
+///
+/// The low 6 bits of each byte then hold one group, and `round_key`, split the
+/// same way by `key_schedule::split_round_key`, is XORed in. The top 2 bits of
+/// each byte hold other bits of `right`, which the caller masks off.
+#[inline(always)]
+pub(super) fn mix_key(right: u32, round_key: [u32; 2]) -> [u32; 2] {
+    [
+        right.rotate_right(3) ^ round_key[0],
+        right.rotate_left(1) ^ round_key[1],
+    ]
+}
 
 /// Computes the cipher function f of FIPS 46-3 for one round.
 ///
-/// Expands the 32-bit half to 48 bits, XORs in the round key, substitutes each
-/// 6-bit group through its S-box to get 32 bits, then applies the P permutation.
+/// [`mix_key`] gives the eight S-box inputs, two words of four bytes. Each input
+/// then goes through its S-box and the permutation P in a single lookup in
+/// [`SP_TABLES`], and the eight results are ORed together.
 #[inline]
-pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
-    let expanded = permute(right as u64, &E_BOX_EXPANSION, 32);
-    let mixed = expanded ^ round_key;
+pub(super) fn feistel(right: u32, round_key: [u32; 2]) -> u32 {
+    let [even, odd] = mix_key(right, round_key);
+    let group = |word: u32, byte: u32| ((word >> (8 * byte)) & 0x3F) as usize;
 
-    let s_boxes = [
-        &SBOX_1, &SBOX_2, &SBOX_3, &SBOX_4, &SBOX_5, &SBOX_6, &SBOX_7, &SBOX_8,
-    ];
-
-    let mut substituted = 0u32;
-
-    for (i, sbox) in s_boxes.iter().enumerate() {
-        // S1 takes the leftmost 6 of the 48 bits, S2 the next 6, and so on.
-        let shift = 42 - (i * 6);
-        let chunk = ((mixed >> shift) & 0x3F) as usize;
-
-        // The outer two bits pick the row and the middle four pick the column.
-        let row = ((chunk & 0x20) >> 4) | (chunk & 1);
-        let col = (chunk >> 1) & 0x0F;
-
-        let value = sbox[row][col] as u32;
-
-        substituted = (substituted << 4) | value;
-    }
-
-    permute(substituted as u64, &P_BOX_PERM, 32) as u32
+    SP_TABLES[0][group(even, 3)]
+        | SP_TABLES[1][group(odd, 3)]
+        | SP_TABLES[2][group(even, 2)]
+        | SP_TABLES[3][group(odd, 2)]
+        | SP_TABLES[4][group(even, 1)]
+        | SP_TABLES[5][group(odd, 1)]
+        | SP_TABLES[6][group(even, 0)]
+        | SP_TABLES[7][group(odd, 0)]
 }
 
 /// Encrypts or decrypts one block in place: IP, 16 Feistel rounds, then IP^-1.
 ///
-/// Decryption is the same process with the round keys in reverse order, which is
-/// what the Feistel structure allows.
-pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16], decrypt: bool) {
-    let value = permute(*block, &INITIAL_PERM, 64);
+/// The order of `round_keys` alone decides the direction. Decryption is the same
+/// process with the keys reversed, which is what the Feistel structure allows.
+/// Each key is split as `key_schedule::split_round_key` does.
+pub(super) fn crypt(block: &mut u64, round_keys: &[[u32; 2]; 16]) {
+    let value = initial_permutation(*block);
 
     let mut left = (value >> 32) as u32;
     let mut right = value as u32;
 
-    for round in 0..16 {
-        let key_index = if decrypt { 15 - round } else { round };
-
-        let next_left = right;
-        let next_right = left ^ feistel(right, round_keys[key_index]);
-
-        left = next_left;
-        right = next_right;
+    // Each round sets L(i) = R(i-1) and R(i) = L(i-1) ^ f(R(i-1), K(i)). Instead
+    // of swapping the halves after every round, each step runs two rounds and lets
+    // the variables trade roles: the first line leaves R(i) in `left` while `right`
+    // still holds R(i-1), which is L(i). The second line then computes R(i+1) into
+    // `right`, so after each step `left` and `right` are back to L and R.
+    for keys in round_keys.chunks_exact(2) {
+        left ^= feistel(right, keys[0]);
+        right ^= feistel(left, keys[1]);
     }
 
-    // The specification doesn't swap after the last round, so undo the loop's swap.
+    // The specification doesn't swap the halves after the last round, so the
+    // preoutput is R16 followed by L16.
     let preoutput = ((right as u64) << 32) | (left as u64);
 
-    *block = permute(preoutput, &FINAL_PERM, 64);
+    *block = final_permutation(preoutput);
 }
