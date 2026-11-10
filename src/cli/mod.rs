@@ -4,3 +4,4 @@
 pub mod args;
 pub mod commands;
 pub mod memory;
+mod pixel;

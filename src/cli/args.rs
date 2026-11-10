@@ -24,6 +24,10 @@ pub enum Command {
     Encrypt(EncryptArgs),
     /// Restore the original file from a container.
     Decrypt(DecryptArgs),
+    /// Encrypt only the pixels of a PNG or BMP image into a viewable image.
+    PixelEncrypt(PixelEncryptArgs),
+    /// Restore the pixels of an image encrypted by pixel-encrypt.
+    PixelDecrypt(PixelDecryptArgs),
 }
 
 /// Options of the `keygen` command.
@@ -97,6 +101,55 @@ pub struct DecryptArgs {
     /// uses one.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
     pub threads: u16,
+    /// Replace the output file if it exists.
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Options of the `pixel-encrypt` command.
+#[derive(Args)]
+pub struct PixelEncryptArgs {
+    /// Image to encrypt, PNG or BMP.
+    #[arg(short, long)]
+    pub input: PathBuf,
+    /// Encrypted image to create, ending in .png or .bmp.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Metadata file to create [default: the output path plus .pixmeta].
+    #[arg(long)]
+    pub meta: Option<PathBuf>,
+    /// Binary key file, as created by keygen.
+    #[arg(short, long)]
+    pub key: PathBuf,
+    /// Encryption algorithm.
+    #[arg(short, long, value_enum, default_value = "des")]
+    pub algorithm: AlgorithmArg,
+    /// Mode of operation: ECB or CBC.
+    #[arg(short, long, value_enum)]
+    pub mode: ModeArg,
+    /// Padding scheme for the last partial block.
+    #[arg(short, long, value_enum, default_value = "pkcs7")]
+    pub padding: PaddingArg,
+    /// Replace the output files if they exist.
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// Options of the `pixel-decrypt` command.
+#[derive(Args)]
+pub struct PixelDecryptArgs {
+    /// Encrypted image.
+    #[arg(short, long)]
+    pub input: PathBuf,
+    /// Image to restore, ending in .png or .bmp.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Metadata file [default: the input path plus .pixmeta].
+    #[arg(long)]
+    pub meta: Option<PathBuf>,
+    /// Binary key file used to encrypt.
+    #[arg(short, long)]
+    pub key: PathBuf,
     /// Replace the output file if it exists.
     #[arg(long)]
     pub force: bool,
