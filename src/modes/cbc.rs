@@ -2,7 +2,7 @@ use rayon::prelude::*;
 
 use crate::ciphers::traits::BlockCipher;
 use crate::modes::blocks::{
-    MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, check_whole_blocks, load_iv, xor_into,
+    BATCH_BLOCKS, MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, check_whole_blocks, load_iv, xor_into,
 };
 use crate::modes::errors::ModeError;
 
@@ -129,22 +129,29 @@ impl<C: BlockCipher> Cbc<C> {
     }
 }
 
-/// Decrypts the non-empty, block-aligned `data` in place, chained from `start`,
-/// the ciphertext block before it.
+/// Decrypts the block-aligned `data` in place, chained from `start`, the ciphertext
+/// block before it.
+///
+/// The blocks are decrypted [`BATCH_BLOCKS`] at a time. Each batch's ciphertext is
+/// copied first, because decrypting in place overwrites the blocks that the XOR
+/// step needs.
 #[inline]
 fn decrypt_chain<C: BlockCipher>(cipher: &C, data: &mut [u8], start: &[u8]) {
     let block_size = C::BLOCK_SIZE;
+    let mut saved = [0u8; BATCH_BLOCKS * MAX_BLOCK_LEN];
+    let mut prev = [0u8; MAX_BLOCK_LEN];
+    prev[..block_size].copy_from_slice(start);
 
-    // Runs from the last block to the first, so each block's previous ciphertext is
-    // still in `data` and nothing has to be saved per block.
-    let mut end = data.len();
-    while end > block_size {
-        let (before, block) = data[..end].split_at_mut(end - block_size);
-        cipher.decrypt_bytes(block);
-        xor_into(block, &before[before.len() - block_size..]);
-        end -= block_size;
+    for batch in data.chunks_mut(BATCH_BLOCKS * block_size) {
+        let len = batch.len();
+        let saved = &mut saved[..len];
+        saved.copy_from_slice(batch);
+        cipher.decrypt_blocks(batch);
+
+        // Block 0 chains from the block before the batch, and every later block
+        // from the saved ciphertext block just before it.
+        xor_into(&mut batch[..block_size], &prev[..block_size]);
+        xor_into(&mut batch[block_size..], &saved[..len - block_size]);
+        prev[..block_size].copy_from_slice(&saved[len - block_size..]);
     }
-    let first = &mut data[..block_size];
-    cipher.decrypt_bytes(first);
-    xor_into(first, start);
 }
