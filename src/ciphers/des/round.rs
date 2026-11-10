@@ -20,25 +20,26 @@ pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
 
 /// Encrypts or decrypts one block in place: IP, 16 Feistel rounds, then IP^-1.
 ///
-/// Decryption is the same process with the round keys in reverse order, which is
-/// what the Feistel structure allows.
-pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16], decrypt: bool) {
+/// The order of `round_keys` alone decides the direction. Decryption is the same
+/// process with the keys reversed, which is what the Feistel structure allows.
+pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16]) {
     let value = initial_permutation(*block);
 
     let mut left = (value >> 32) as u32;
     let mut right = value as u32;
 
-    for round in 0..16 {
-        let key_index = if decrypt { 15 - round } else { round };
-
-        let next_left = right;
-        let next_right = left ^ feistel(right, round_keys[key_index]);
-
-        left = next_left;
-        right = next_right;
+    // Each round sets L(i) = R(i-1) and R(i) = L(i-1) ^ f(R(i-1), K(i)). Instead
+    // of swapping the halves after every round, each step runs two rounds and lets
+    // the variables trade roles: the first line leaves R(i) in `left` while `right`
+    // still holds R(i-1), which is L(i). The second line then computes R(i+1) into
+    // `right`, so after each step `left` and `right` are back to L and R.
+    for keys in round_keys.chunks_exact(2) {
+        left ^= feistel(right, keys[0]);
+        right ^= feistel(left, keys[1]);
     }
 
-    // The specification doesn't swap after the last round, so undo the loop's swap.
+    // The specification doesn't swap the halves after the last round, so the
+    // preoutput is R16 followed by L16.
     let preoutput = ((right as u64) << 32) | (left as u64);
 
     *block = final_permutation(preoutput);
