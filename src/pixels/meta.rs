@@ -30,7 +30,7 @@ const VERSION: u8 = 1;
 /// Everything before the IV.
 const FIXED_LEN: usize = 16;
 /// Bytes per pixel of 8-bit RGB.
-const BYTES_PER_PIXEL: u64 = 3;
+const BYTES_PER_PIXEL: u128 = 3;
 
 /// The settings of one pixel encryption, everything except the key.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,16 +84,17 @@ pub struct PixelMeta {
 }
 
 impl PixelMeta {
-    /// Returns the length of the RGB pixel data in bytes.
-    pub fn pixel_len(&self) -> u64 {
-        u64::from(self.width) * u64::from(self.height) * BYTES_PER_PIXEL
+    /// Returns the length of the RGB pixel data in bytes. It is a `u128` because
+    /// width times height times 3 can exceed `u64::MAX`.
+    pub fn pixel_len(&self) -> u128 {
+        u128::from(self.width) * u128::from(self.height) * BYTES_PER_PIXEL
     }
 
     /// Returns the tail block length the dimensions call for: 0 if the pixel data
     /// is block-aligned, otherwise one block.
     pub fn expected_tail_len(&self) -> usize {
         let block_size = self.params.algorithm.block_size();
-        if self.pixel_len().is_multiple_of(block_size as u64) {
+        if self.pixel_len().is_multiple_of(block_size as u128) {
             0
         } else {
             block_size

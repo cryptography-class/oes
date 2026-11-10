@@ -79,8 +79,9 @@ fn write_to_refuses_invalid_metadata_and_writes_nothing() {
 fn from_bytes_round_trips_every_mode_padding_and_size() {
     for mode in [Mode::Ecb, Mode::Cbc] {
         for padding in PADDINGS {
-            // 3, 48 (aligned) and about 2^34 bytes of pixels.
-            for (width, height) in [(1, 1), (4, 4), (u32::MAX, 3)] {
+            // 3, 48 (aligned), about 2^35 and about 2^66 bytes of pixels; the last
+            // overflows u64.
+            for (width, height) in [(1, 1), (4, 4), (u32::MAX, 3), (u32::MAX, u32::MAX)] {
                 let mut meta = PixelMeta {
                     params: PixelParams {
                         algorithm: Algorithm::Des,
