@@ -62,13 +62,11 @@ impl<C: BlockCipher> Ecb<C> {
     pub fn encrypt(&self, data: &mut [u8]) -> Result<(), ModeError> {
         check_whole_blocks(data.len(), C::BLOCK_SIZE)?;
         if self.parallel && data.len() > PAR_CHUNK_BLOCKS * C::BLOCK_SIZE {
-            self.for_each_chunk(data, |cipher, block| cipher.encrypt_bytes(block));
+            self.for_each_chunk(data, |cipher, chunk| cipher.encrypt_blocks(chunk));
             return Ok(());
         }
 
-        for block in data.chunks_exact_mut(C::BLOCK_SIZE) {
-            self.cipher.encrypt_bytes(block);
-        }
+        self.cipher.encrypt_blocks(data);
         Ok(())
     }
 
@@ -81,25 +79,19 @@ impl<C: BlockCipher> Ecb<C> {
     pub fn decrypt(&self, data: &mut [u8]) -> Result<(), ModeError> {
         check_whole_blocks(data.len(), C::BLOCK_SIZE)?;
         if self.parallel && data.len() > PAR_CHUNK_BLOCKS * C::BLOCK_SIZE {
-            self.for_each_chunk(data, |cipher, block| cipher.decrypt_bytes(block));
+            self.for_each_chunk(data, |cipher, chunk| cipher.decrypt_blocks(chunk));
             return Ok(());
         }
 
-        for block in data.chunks_exact_mut(C::BLOCK_SIZE) {
-            self.cipher.decrypt_bytes(block);
-        }
+        self.cipher.decrypt_blocks(data);
         Ok(())
     }
 
-    /// Runs `op` on every block of `data`, with the pieces of
-    /// [`PAR_CHUNK_BLOCKS`] blocks spread over the current Rayon pool.
+    /// Runs `op` on each piece of [`PAR_CHUNK_BLOCKS`] blocks of `data`, with the
+    /// pieces spread over the current Rayon pool.
     fn for_each_chunk(&self, data: &mut [u8], op: impl Fn(&C, &mut [u8]) + Sync) {
         let cipher = &self.cipher;
         data.par_chunks_mut(PAR_CHUNK_BLOCKS * C::BLOCK_SIZE)
-            .for_each(|chunk| {
-                for block in chunk.chunks_exact_mut(C::BLOCK_SIZE) {
-                    op(cipher, block);
-                }
-            });
+            .for_each(|chunk| op(cipher, chunk));
     }
 }
