@@ -40,6 +40,89 @@ fn des_decrypt_known_vector() {
     assert_eq!(block, expected);
 }
 
+// ---- encrypt_blocks and decrypt_blocks ----
+
+// NIST SP 800-17, Table 1 (variable plaintext known answer test): key
+// 0101010101010101, plaintexts with one bit set. The first nine entries make two
+// full groups of four blocks plus one left over. Checked with OpenSSL 3.5.
+const SP_800_17_PLAINTEXT: [u64; 9] = [
+    0x8000_0000_0000_0000,
+    0x4000_0000_0000_0000,
+    0x2000_0000_0000_0000,
+    0x1000_0000_0000_0000,
+    0x0800_0000_0000_0000,
+    0x0400_0000_0000_0000,
+    0x0200_0000_0000_0000,
+    0x0100_0000_0000_0000,
+    0x0080_0000_0000_0000,
+];
+const SP_800_17_CIPHERTEXT: [u64; 9] = [
+    0x95F8_A5E5_DD31_D900,
+    0xDD7F_121C_A501_5619,
+    0x2E86_5310_4F38_34EA,
+    0x4BD3_88FF_6CD8_1D4F,
+    0x20B9_E767_B2FB_1456,
+    0x5557_9380_D771_38EF,
+    0x6CC5_DEFA_AF04_512F,
+    0x0D9F_279B_A5D8_7260,
+    0xD903_1B02_71BD_5A0A,
+];
+
+fn to_bytes(blocks: &[u64]) -> Vec<u8> {
+    blocks
+        .iter()
+        .flat_map(|block| block.to_be_bytes())
+        .collect()
+}
+
+#[test]
+fn encrypt_blocks_known_answer_sp_800_17() {
+    let cipher = DesCipher::new(&[0x01; 8]);
+    let mut data = to_bytes(&SP_800_17_PLAINTEXT);
+
+    cipher.encrypt_blocks(&mut data);
+    assert_eq!(data, to_bytes(&SP_800_17_CIPHERTEXT));
+
+    cipher.decrypt_blocks(&mut data);
+    assert_eq!(data, to_bytes(&SP_800_17_PLAINTEXT));
+}
+
+/// Lengths of 0 to 3 blocks only take the one-at-a-time path, 4 is one group, and
+/// 5 to 9 mix both. The reference is `encrypt_block`, one block per call.
+#[test]
+fn encrypt_blocks_matches_encrypt_block_for_each_length() {
+    let cipher = DesCipher::new(&[0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]);
+    let plaintext: Vec<u64> = (0..9u64)
+        .map(|i| 0x0123_4567_89AB_CDEF_u64.rotate_left(7 * i as u32) ^ i)
+        .collect();
+
+    for blocks in 0..=plaintext.len() {
+        let mut expected = plaintext[..blocks].to_vec();
+        for block in &mut expected {
+            cipher.encrypt_block(block);
+        }
+
+        let mut data = to_bytes(&plaintext[..blocks]);
+        cipher.encrypt_blocks(&mut data);
+        assert_eq!(data, to_bytes(&expected), "{blocks} blocks");
+
+        cipher.decrypt_blocks(&mut data);
+        assert_eq!(data, to_bytes(&plaintext[..blocks]), "{blocks} blocks");
+    }
+}
+
+#[test]
+#[should_panic(expected = "whole number of blocks")]
+fn encrypt_blocks_panics_on_a_partial_block() {
+    DesCipher::new(&[0x01; 8]).encrypt_blocks(&mut [0; 36]);
+}
+
+#[test]
+#[should_panic(expected = "whole number of blocks")]
+fn decrypt_blocks_panics_on_a_partial_block() {
+    DesCipher::new(&[0x01; 8]).decrypt_blocks(&mut [0; 36]);
+}
+
 // ---- generate_round_keys ----
 
 // J. Orlin Grabbe, "The DES Algorithm Illustrated": key 133457799BBCDFF1 gives

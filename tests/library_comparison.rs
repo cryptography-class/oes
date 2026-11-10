@@ -15,8 +15,9 @@ use oes::modes::{Cbc, Ctr, Ecb};
 const KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 const IV: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
 
-/// Block-aligned lengths for ECB and CBC: empty, one block, many blocks.
-const ALIGNED_LENS: [usize; 3] = [0, 8, 64 * 8];
+/// Block-aligned lengths for ECB and CBC: empty, one block, and many blocks that
+/// don't divide into whole groups of 4 or batches of 16.
+const ALIGNED_LENS: [usize; 3] = [0, 8, 67 * 8];
 
 /// Lengths for CTR, which takes any length: around one block, and unaligned.
 const ANY_LENS: [usize; 6] = [0, 1, 7, 8, 9, 1000];

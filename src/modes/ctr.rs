@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 
 use crate::ciphers::traits::BlockCipher;
-use crate::modes::blocks::{MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, load_iv, xor_into};
+use crate::modes::blocks::{BATCH_BLOCKS, MAX_BLOCK_LEN, PAR_CHUNK_BLOCKS, load_iv, xor_into};
 use crate::modes::errors::ModeError;
 
 /// Counter mode (NIST SP 800-38A section 6.5): the cipher encrypts a sequence of
@@ -110,33 +110,29 @@ impl<C: BlockCipher> Ctr<C> {
             return Ok(());
         }
 
-        let counter = &mut self.counter[..C::BLOCK_SIZE];
-        let mut buffer = [0u8; MAX_BLOCK_LEN];
-        let keystream = &mut buffer[..C::BLOCK_SIZE];
-
-        // A partial last block uses the start of its keystream.
-        for chunk in data.chunks_mut(C::BLOCK_SIZE) {
-            keystream.copy_from_slice(counter);
-            self.cipher.encrypt_bytes(keystream);
-            xor_into(chunk, keystream);
-            increment(counter);
-        }
-
+        apply_from(&self.cipher, &mut self.counter[..C::BLOCK_SIZE], data);
         self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
         Ok(())
     }
 }
 
 /// XORs the keystream that starts at `counter` into `data`, leaving `counter` one
-/// past the last block used. Used by the parallel path, one piece per call.
+/// past the last block used. The parallel path calls it once per piece.
+///
+/// The counter blocks are encrypted [`BATCH_BLOCKS`] at a time. A partial last
+/// block uses the start of its keystream.
 fn apply_from<C: BlockCipher>(cipher: &C, counter: &mut [u8], data: &mut [u8]) {
-    let mut buffer = [0u8; MAX_BLOCK_LEN];
-    let keystream = &mut buffer[..C::BLOCK_SIZE];
-    for chunk in data.chunks_mut(C::BLOCK_SIZE) {
-        keystream.copy_from_slice(counter);
-        cipher.encrypt_bytes(keystream);
-        xor_into(chunk, keystream);
-        increment(counter);
+    let block_size = C::BLOCK_SIZE;
+    let mut buffer = [0u8; BATCH_BLOCKS * MAX_BLOCK_LEN];
+
+    for batch in data.chunks_mut(BATCH_BLOCKS * block_size) {
+        let keystream = &mut buffer[..batch.len().next_multiple_of(block_size)];
+        for block in keystream.chunks_exact_mut(block_size) {
+            block.copy_from_slice(counter);
+            increment(counter);
+        }
+        cipher.encrypt_blocks(keystream);
+        xor_into(batch, keystream);
     }
 }
 

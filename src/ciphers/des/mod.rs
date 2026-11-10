@@ -7,7 +7,8 @@
 //! code follows the specification step by step:
 //!
 //! - `key_schedule` derives the 16 round keys.
-//! - `round` runs the 16 Feistel rounds.
+//! - `round` runs the 16 Feistel rounds, on several independent blocks at once
+//!   when the experimental `interleave` feature is on (the default).
 //! - `permutations` applies the initial and final permutations with delta swaps,
 //!   in place of reading their tables bit by bit.
 //! - `sp_tables` merges each S-box with the permutation P into one lookup table,

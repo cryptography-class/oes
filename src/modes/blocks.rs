@@ -12,6 +12,14 @@ pub(super) const MAX_BLOCK_LEN: usize = 16;
 /// leave the fast cores idle while the slow ones finish.
 pub(super) const PAR_CHUNK_BLOCKS: usize = 1024;
 
+/// The number of blocks a mode gives the cipher in one call when it works through
+/// a stack buffer, as CTR and CBC decryption do.
+///
+/// Several blocks per call let a cipher overlap independent blocks, and 16 splits
+/// evenly into groups of 2, 4 or 8. With 16-byte blocks, a buffer stays at 256
+/// bytes.
+pub(super) const BATCH_BLOCKS: usize = 16;
+
 /// Copies a one-block IV or counter into a buffer, in its first block-sized bytes.
 pub(super) fn load_iv<C: BlockCipher>(iv: &[u8]) -> Result<[u8; MAX_BLOCK_LEN], ModeError> {
     const { assert!(C::BLOCK_SIZE <= MAX_BLOCK_LEN) };

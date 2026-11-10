@@ -31,3 +31,9 @@ jobs:
       
       - name: Run clippy
         run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests without interleaving
+        run: cargo test --locked --verbose --no-default-features
+
+      - name: Run clippy without interleaving
+        run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
