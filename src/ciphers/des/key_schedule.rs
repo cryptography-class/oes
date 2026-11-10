@@ -29,3 +29,17 @@ pub(super) fn generate_round_keys(key: &[u8; 8]) -> [u64; 16] {
 
     round_keys
 }
+
+/// Splits a 48-bit round key into the two words that `round::mix_key` XORs in.
+///
+/// The key's eight 6-bit groups, numbered 0 to 7 from the left, are the S-box
+/// inputs' key parts. The first word holds groups 0, 2, 4 and 6 and the second
+/// groups 1, 3, 5 and 7, each group in the low 6 bits of its own byte, from the
+/// top byte down. The top 2 bits of each byte are zero.
+pub(super) fn split_round_key(round_key: u64) -> [u32; 2] {
+    let group = |j: u32| ((round_key >> (42 - 6 * j)) & 0x3F) as u32;
+    [
+        group(0) << 24 | group(2) << 16 | group(4) << 8 | group(6),
+        group(1) << 24 | group(3) << 16 | group(5) << 8 | group(7),
+    ]
+}

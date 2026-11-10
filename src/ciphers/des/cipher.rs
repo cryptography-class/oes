@@ -47,10 +47,11 @@ impl Block for u64 {
 /// assert_eq!(block, 0x0123_4567_89AB_CDEF);
 /// ```
 pub struct DesCipher {
-    /// The 16 round keys, in the order encryption uses them.
-    encrypt_keys: [u64; 16],
+    /// The 16 round keys, in the order encryption uses them, each split into two
+    /// words by `key_schedule::split_round_key`.
+    encrypt_keys: [[u32; 2]; 16],
     /// The same keys reversed, which is the order decryption uses them.
-    decrypt_keys: [u64; 16],
+    decrypt_keys: [[u32; 2]; 16],
 }
 
 impl Drop for DesCipher {
@@ -62,7 +63,10 @@ impl Drop for DesCipher {
 
 impl KeyInit<8> for DesCipher {
     fn new(key: &[u8; 8]) -> Self {
-        let encrypt_keys = key_schedule::generate_round_keys(key);
+        let mut round_keys = key_schedule::generate_round_keys(key);
+        let encrypt_keys = round_keys.map(key_schedule::split_round_key);
+        wipe(&mut round_keys);
+
         let mut decrypt_keys = encrypt_keys;
         decrypt_keys.reverse();
         Self {

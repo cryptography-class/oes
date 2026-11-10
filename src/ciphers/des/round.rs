@@ -1,28 +1,57 @@
-use crate::ciphers::des::permutations::{expand, final_permutation, initial_permutation};
+use crate::ciphers::des::permutations::{final_permutation, initial_permutation};
 use crate::ciphers::des::sp_tables::SP_TABLES;
+
+/// Computes the expansion E of a 32-bit half XORed with a round key, as the eight
+/// 6-bit S-box inputs of FIPS 46-3, without building the 48-bit value.
+///
+/// E's output group `j` (0 to 7, from the left) is the six consecutive bits `4j` to
+/// `4j + 5` of `right`, where bit 0 stands for bit 32. Rotating `right` right by
+/// `27 - 4j` would bring that group to the bottom. One rotation lines up four
+/// groups at once, one per byte, because the rotations they need differ by 8:
+///
+/// ```text
+/// word   rotation          byte 3    byte 2    byte 1    byte 0
+/// even   right by 3        group 0   group 2   group 4   group 6
+/// odd    left by 1         group 1   group 3   group 5   group 7
+/// ```
+///
+/// The low 6 bits of each byte then hold one group, and `round_key`, split the
+/// same way by `key_schedule::split_round_key`, is XORed in. The top 2 bits of
+/// each byte hold other bits of `right`, which the caller masks off.
+#[inline(always)]
+pub(super) fn mix_key(right: u32, round_key: [u32; 2]) -> [u32; 2] {
+    [
+        right.rotate_right(3) ^ round_key[0],
+        right.rotate_left(1) ^ round_key[1],
+    ]
+}
 
 /// Computes the cipher function f of FIPS 46-3 for one round.
 ///
-/// Expands the 32-bit half to 48 bits and XORs in the round key. Each 6-bit group
+/// [`mix_key`] gives the eight S-box inputs, two words of four bytes. Each input
 /// then goes through its S-box and the permutation P in a single lookup in
 /// [`SP_TABLES`], and the eight results are ORed together.
 #[inline]
-pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
-    let mixed = expand(right) ^ round_key;
+pub(super) fn feistel(right: u32, round_key: [u32; 2]) -> u32 {
+    let [even, odd] = mix_key(right, round_key);
+    let group = |word: u32, byte: u32| ((word >> (8 * byte)) & 0x3F) as usize;
 
-    let mut output = 0;
-    for (i, table) in SP_TABLES.iter().enumerate() {
-        // S1 takes the leftmost 6 of the 48 bits, S2 the next 6, and so on.
-        output |= table[((mixed >> (42 - 6 * i)) & 0x3F) as usize];
-    }
-    output
+    SP_TABLES[0][group(even, 3)]
+        | SP_TABLES[1][group(odd, 3)]
+        | SP_TABLES[2][group(even, 2)]
+        | SP_TABLES[3][group(odd, 2)]
+        | SP_TABLES[4][group(even, 1)]
+        | SP_TABLES[5][group(odd, 1)]
+        | SP_TABLES[6][group(even, 0)]
+        | SP_TABLES[7][group(odd, 0)]
 }
 
 /// Encrypts or decrypts one block in place: IP, 16 Feistel rounds, then IP^-1.
 ///
 /// The order of `round_keys` alone decides the direction. Decryption is the same
 /// process with the keys reversed, which is what the Feistel structure allows.
-pub(super) fn crypt(block: &mut u64, round_keys: &[u64; 16]) {
+/// Each key is split as `key_schedule::split_round_key` does.
+pub(super) fn crypt(block: &mut u64, round_keys: &[[u32; 2]; 16]) {
     let value = initial_permutation(*block);
 
     let mut left = (value >> 32) as u32;

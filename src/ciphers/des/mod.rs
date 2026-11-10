@@ -8,8 +8,8 @@
 //!
 //! - `key_schedule` derives the 16 round keys.
 //! - `round` runs the 16 Feistel rounds.
-//! - `permutations` computes some of the specification's permutations with
-//!   shifts and masks, in place of reading their tables bit by bit.
+//! - `permutations` applies the initial and final permutations with delta swaps,
+//!   in place of reading their tables bit by bit.
 //! - `sp_tables` merges each S-box with the permutation P into one lookup table,
 //!   built at compile time.
 //! - `tables` holds the permutations and S-boxes from the specification.

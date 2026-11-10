@@ -1,8 +1,13 @@
 //! The DES tables, exactly as printed in FIPS 46-3.
 //!
-//! Permutation tables are 1-indexed and count bits from the left, and are read by
-//! `bits::permute`. S-boxes are indexed `[row][column]`, where the first and last
-//! of the 6 input bits form the row and the middle four form the column.
+//! Permutation tables are 1-indexed and count bits from the left, as
+//! `bits::permute` reads them. S-boxes are indexed `[row][column]`, where the first
+//! and last of the 6 input bits form the row and the middle four form the column.
+//!
+//! These tables define DES, but the rounds don't read them as they run. IP, IP^-1
+//! and E are computed with shifts and swaps, which tests check against the tables
+//! here. The S-boxes and P are read once, at compile time, to build `sp_tables`.
+//! The key schedule reads PC-1 and PC-2 through `bits::permute`.
 
 /// The initial permutation IP, applied to the block before the first round.
 #[cfg_attr(
@@ -37,7 +42,7 @@ pub const FINAL_PERM: [u64; 64] = [
     not(test),
     expect(
         dead_code,
-        reason = "only tests read it: the rounds compute E with shifts"
+        reason = "only tests read it: the rounds line up E's groups with rotations"
     )
 )]
 pub const E_BOX_EXPANSION: [u64; 48] = [
