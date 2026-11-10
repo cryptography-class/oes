@@ -81,11 +81,11 @@ impl BlockCipher for DesCipher {
 
     #[inline]
     fn encrypt_block(&self, block: &mut Self::Block) {
-        round::crypt(block, &self.encrypt_keys);
+        round::crypt_n(std::array::from_mut(block), &self.encrypt_keys);
     }
 
     #[inline]
     fn decrypt_block(&self, block: &mut Self::Block) {
-        round::crypt(block, &self.decrypt_keys);
+        round::crypt_n(std::array::from_mut(block), &self.decrypt_keys);
     }
 }
