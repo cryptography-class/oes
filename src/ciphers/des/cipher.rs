@@ -26,6 +26,10 @@ impl Block for u64 {
 /// identically. Use [`check_parity`](super::parity::check_parity) if the key's parity
 /// matters. The round keys are erased from memory when the cipher is dropped.
 ///
+/// It doesn't run in constant time. Each round looks up tables at positions that
+/// depend on the key and the data, so on shared hardware the timing of memory
+/// accesses can leak information about them.
+///
 /// # Examples
 ///
 /// ```

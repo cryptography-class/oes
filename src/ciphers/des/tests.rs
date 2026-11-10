@@ -1,6 +1,9 @@
 use super::DesCipher;
 use super::permutations::expand;
-use super::tables::E_BOX_EXPANSION;
+use super::sp_tables::SP_TABLES;
+use super::tables::{
+    E_BOX_EXPANSION, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5, SBOX_6, SBOX_7, SBOX_8,
+};
 use crate::bits::permute;
 use crate::ciphers::traits::{BlockCipher, KeyInit};
 
@@ -46,5 +49,23 @@ fn expand_matches_the_e_table_for_each_input_bit() {
         let right = 1u32 << bit;
         let expected = permute(u64::from(right), &E_BOX_EXPANSION, 32);
         assert_eq!(expand(right), expected, "input bit {bit}");
+    }
+}
+
+// ---- SP_TABLES ----
+
+#[test]
+fn sp_tables_match_each_s_box_followed_by_p() {
+    let s_boxes = [
+        &SBOX_1, &SBOX_2, &SBOX_3, &SBOX_4, &SBOX_5, &SBOX_6, &SBOX_7, &SBOX_8,
+    ];
+    for (i, (s_box, table)) in s_boxes.iter().zip(&SP_TABLES).enumerate() {
+        for (x, &entry) in table.iter().enumerate() {
+            let row = ((x >> 4) & 0b10) | (x & 1);
+            let col = (x >> 1) & 0xF;
+            let placed = s_box[row][col] << (28 - 4 * i);
+            let expected = permute(placed, &P_BOX_PERM, 32) as u32;
+            assert_eq!(entry, expected, "S{}, input {x:06b}", i + 1);
+        }
     }
 }

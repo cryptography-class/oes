@@ -1,39 +1,23 @@
 use crate::bits::permute;
 use crate::ciphers::des::permutations::expand;
-use crate::ciphers::des::tables::{
-    FINAL_PERM, INITIAL_PERM, P_BOX_PERM, SBOX_1, SBOX_2, SBOX_3, SBOX_4, SBOX_5, SBOX_6, SBOX_7,
-    SBOX_8,
-};
+use crate::ciphers::des::sp_tables::SP_TABLES;
+use crate::ciphers::des::tables::{FINAL_PERM, INITIAL_PERM};
 
 /// Computes the cipher function f of FIPS 46-3 for one round.
 ///
-/// Expands the 32-bit half to 48 bits, XORs in the round key, substitutes each
-/// 6-bit group through its S-box to get 32 bits, then applies the P permutation.
+/// Expands the 32-bit half to 48 bits and XORs in the round key. Each 6-bit group
+/// then goes through its S-box and the permutation P in a single lookup in
+/// [`SP_TABLES`], and the eight results are ORed together.
 #[inline]
 pub(super) fn feistel(right: u32, round_key: u64) -> u32 {
     let mixed = expand(right) ^ round_key;
 
-    let s_boxes = [
-        &SBOX_1, &SBOX_2, &SBOX_3, &SBOX_4, &SBOX_5, &SBOX_6, &SBOX_7, &SBOX_8,
-    ];
-
-    let mut substituted = 0u32;
-
-    for (i, sbox) in s_boxes.iter().enumerate() {
+    let mut output = 0;
+    for (i, table) in SP_TABLES.iter().enumerate() {
         // S1 takes the leftmost 6 of the 48 bits, S2 the next 6, and so on.
-        let shift = 42 - (i * 6);
-        let chunk = ((mixed >> shift) & 0x3F) as usize;
-
-        // The outer two bits pick the row and the middle four pick the column.
-        let row = ((chunk & 0x20) >> 4) | (chunk & 1);
-        let col = (chunk >> 1) & 0x0F;
-
-        let value = sbox[row][col] as u32;
-
-        substituted = (substituted << 4) | value;
+        output |= table[((mixed >> (42 - 6 * i)) & 0x3F) as usize];
     }
-
-    permute(substituted as u64, &P_BOX_PERM, 32) as u32
+    output
 }
 
 /// Encrypts or decrypts one block in place: IP, 16 Feistel rounds, then IP^-1.
