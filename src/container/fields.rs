@@ -68,6 +68,9 @@ impl ImageType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Algorithm {
     Des,
+    Aes128,
+    Aes192,
+    Aes256,
 }
 
 impl Algorithm {
@@ -75,6 +78,7 @@ impl Algorithm {
     pub fn block_size(self) -> usize {
         match self {
             Self::Des => 8,
+            Self::Aes128 | Self::Aes192 | Self::Aes256 => 16,
         }
     }
 
@@ -82,18 +86,27 @@ impl Algorithm {
     pub fn key_len(self) -> usize {
         match self {
             Self::Des => 8,
+            Self::Aes128 => 16,
+            Self::Aes192 => 24,
+            Self::Aes256 => 32,
         }
     }
 
     pub(crate) fn to_byte(self) -> u8 {
         match self {
             Self::Des => 1,
+            Self::Aes128 => 2,
+            Self::Aes192 => 3,
+            Self::Aes256 => 4,
         }
     }
 
     pub(crate) fn from_byte(value: u8) -> Result<Self, ContainerError> {
         match value {
             1 => Ok(Self::Des),
+            2 => Ok(Self::Aes128),
+            3 => Ok(Self::Aes192),
+            4 => Ok(Self::Aes256),
             _ => Err(ContainerError::UnknownCode {
                 field: "algorithm",
                 value,

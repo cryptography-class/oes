@@ -31,7 +31,7 @@ fn assert_success(output: &Output, context: &str) {
 }
 
 /// Every algorithm the program supports, as named on the command line.
-const ALGORITHMS: [&str; 1] = ["des"];
+const ALGORITHMS: [&str; 4] = ["des", "aes128", "aes192", "aes256"];
 
 /// A temporary directory holding a freshly generated key for one algorithm.
 struct Setup {

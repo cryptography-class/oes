@@ -88,6 +88,14 @@ fn write_to_refuses_invalid_combinations() {
         ("CBC with a long IV", with(|h| h.iv.push(9))),
         ("CTR with padding", with(|h| h.mode = Mode::Ctr)),
         (
+            "PKCS#5 with AES",
+            with(|h| {
+                h.algorithm = Algorithm::Aes128;
+                h.padding = Some(Padding::Pkcs5);
+                h.iv = vec![0; 16];
+            }),
+        ),
+        (
             "CTR with a short IV",
             with(|h| {
                 h.mode = Mode::Ctr;
@@ -177,7 +185,7 @@ fn read_from_rejects_unknown_codes() {
     let cases = [
         (5, "image type", 4),
         (6, "algorithm", 0),
-        (6, "algorithm", 2),
+        (6, "algorithm", 5),
         (7, "mode", 0),
         (7, "mode", 4),
         (8, "padding", 5),

@@ -21,7 +21,7 @@ pub struct Key {
 
 impl Key {
     /// Generates a key with the operating system's secure random generator.
-    /// DES keys get valid parity bits.
+    /// DES keys get valid parity bits; AES keys have none.
     ///
     /// # Errors
     ///
@@ -33,6 +33,7 @@ impl Key {
         };
         match algorithm {
             Algorithm::Des => set_parity(key.as_array_mut::<8>()?),
+            Algorithm::Aes128 | Algorithm::Aes192 | Algorithm::Aes256 => {}
         }
         Ok(key)
     }
@@ -120,6 +121,7 @@ impl Key {
                 Some(byte) => Err(KeyError::BadParity { byte }),
                 None => Ok(()),
             },
+            Algorithm::Aes128 | Algorithm::Aes192 | Algorithm::Aes256 => Ok(()),
         }
     }
 }

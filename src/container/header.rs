@@ -5,7 +5,7 @@
 //! 0       4     magic "OESC"
 //! 4       1     format version (1)
 //! 5       1     original image type   (0 unknown, 1 BMP, 2 PNG, 3 JPEG)
-//! 6       1     algorithm             (1 DES)
+//! 6       1     algorithm             (1 DES, 2 AES-128, 3 AES-192, 4 AES-256)
 //! 7       1     mode                  (1 ECB, 2 CBC, 3 CTR)
 //! 8       1     padding               (0 none, 1 PKCS#7, 2 PKCS#5,
 //!                                      3 ANSI X9.23 zeros, 4 ANSI X9.23 random)
@@ -15,8 +15,8 @@
 //! ```
 //!
 //! The IV length isn't stored, because the algorithm and mode determine it.
-//! Codes for AES (algorithm 2 to 4) and GCM (mode 4, followed by a 16-byte tag
-//! at the end of the file) will be added without moving any field.
+//! A code for GCM (mode 4, followed by a 16-byte tag at the end of the file)
+//! will be added without moving any field.
 
 use std::io::{ErrorKind, Read, Write};
 

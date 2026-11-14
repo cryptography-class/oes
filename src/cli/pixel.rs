@@ -2,8 +2,9 @@
 
 use std::time::Instant;
 
+use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::des::DesCipher;
-use oes::ciphers::traits::KeyInit;
+use oes::ciphers::traits::{BlockCipher, KeyInit};
 use oes::container::{Algorithm, Mode};
 use oes::keys::Key;
 use oes::modes::{BlockMode, Cbc, Ecb};
@@ -113,9 +114,19 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
 
 /// Builds the sequential ECB or CBC mode that `params` names, keyed with `key`.
 fn build_block_mode(params: &PixelParams, key: &Key) -> CliResult<Box<dyn BlockMode>> {
-    let cipher = match params.algorithm {
-        Algorithm::Des => DesCipher::new(key.as_array::<8>()?),
-    };
+    match params.algorithm {
+        Algorithm::Des => mode_for(DesCipher::new(key.as_array::<8>()?), params),
+        Algorithm::Aes128 => mode_for(Aes128Cipher::new(key.as_array::<16>()?), params),
+        Algorithm::Aes192 => mode_for(Aes192Cipher::new(key.as_array::<24>()?), params),
+        Algorithm::Aes256 => mode_for(Aes256Cipher::new(key.as_array::<32>()?), params),
+    }
+}
+
+/// Builds the ECB or CBC mode that `params` names around `cipher`.
+fn mode_for<C: BlockCipher + 'static>(
+    cipher: C,
+    params: &PixelParams,
+) -> CliResult<Box<dyn BlockMode>> {
     match params.mode {
         Mode::Ecb => Ok(Box::new(Ecb::new(cipher))),
         Mode::Cbc => Ok(Box::new(Cbc::new(cipher, &params.iv)?)),
