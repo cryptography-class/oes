@@ -31,7 +31,7 @@ fn assert_success(output: &Output, context: &str) {
 }
 
 /// Every algorithm the program supports, as named on the command line.
-const ALGORITHMS: [&str; 1] = ["des"];
+const ALGORITHMS: [&str; 4] = ["des", "aes128", "aes192", "aes256"];
 
 /// A temporary directory holding a freshly generated key for one algorithm.
 struct Setup {
@@ -101,7 +101,14 @@ fn sample(len: usize) -> Vec<u8> {
 
 #[test]
 fn round_trip_restores_every_algorithm_mode_and_length() {
-    let cases: [(usize, &str); 4] = [(0, "65536"), (8, "65536"), (13, "65536"), (100, "16")];
+    // 8 and 16 bytes are exactly one DES and one AES block.
+    let cases: [(usize, &str); 5] = [
+        (0, "65536"),
+        (8, "65536"),
+        (13, "65536"),
+        (16, "65536"),
+        (100, "16"),
+    ];
     for algorithm in ALGORITHMS {
         let setup = Setup::new("cli", algorithm);
         for mode in ["ecb", "cbc", "ctr"] {

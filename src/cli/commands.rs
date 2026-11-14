@@ -4,6 +4,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::des::DesCipher;
 use oes::ciphers::traits::{BlockCipher, KeyInit};
 use oes::container::{Algorithm, Header, ImageType, Mode};
@@ -217,6 +218,33 @@ fn run_cipher<R: Read, W: Write>(
             buffer_size,
             parallel,
         ),
+        Algorithm::Aes128 => run_mode(
+            Aes128Cipher::new(key.as_array::<16>()?),
+            header,
+            direction,
+            reader,
+            writer,
+            buffer_size,
+            parallel,
+        ),
+        Algorithm::Aes192 => run_mode(
+            Aes192Cipher::new(key.as_array::<24>()?),
+            header,
+            direction,
+            reader,
+            writer,
+            buffer_size,
+            parallel,
+        ),
+        Algorithm::Aes256 => run_mode(
+            Aes256Cipher::new(key.as_array::<32>()?),
+            header,
+            direction,
+            reader,
+            writer,
+            buffer_size,
+            parallel,
+        ),
     }
 }
 
@@ -421,6 +449,9 @@ pub(super) fn file_with_size(path: &Path) -> CliResult<String> {
 fn algorithm_name(algorithm: Algorithm) -> &'static str {
     match algorithm {
         Algorithm::Des => "DES",
+        Algorithm::Aes128 => "AES-128",
+        Algorithm::Aes192 => "AES-192",
+        Algorithm::Aes256 => "AES-256",
     }
 }
 

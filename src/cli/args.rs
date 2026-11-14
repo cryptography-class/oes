@@ -160,12 +160,21 @@ pub struct PixelDecryptArgs {
 pub enum AlgorithmArg {
     /// DES, with a 56-bit key. Broken; for demonstration only.
     Des,
+    /// AES with a 128-bit key.
+    Aes128,
+    /// AES with a 192-bit key.
+    Aes192,
+    /// AES with a 256-bit key.
+    Aes256,
 }
 
 impl From<AlgorithmArg> for Algorithm {
     fn from(algorithm: AlgorithmArg) -> Self {
         match algorithm {
             AlgorithmArg::Des => Algorithm::Des,
+            AlgorithmArg::Aes128 => Algorithm::Aes128,
+            AlgorithmArg::Aes192 => Algorithm::Aes192,
+            AlgorithmArg::Aes256 => Algorithm::Aes256,
         }
     }
 }

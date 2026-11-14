@@ -4,7 +4,7 @@
 //! offset  size  field
 //! 0       4     magic "OESP"
 //! 4       1     format version (1)
-//! 5       1     algorithm   (container codes: 1 DES)
+//! 5       1     algorithm   (container codes: 1 DES, 2 AES-128, 3 AES-192, 4 AES-256)
 //! 6       1     mode        (container codes: 1 ECB, 2 CBC)
 //! 7       1     padding     (container codes 1 to 4; 0, no padding, is invalid here)
 //! 8       4     width in pixels,  u32 big-endian

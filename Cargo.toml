@@ -19,9 +19,10 @@ image = { version = "0.25", default-features = false, features = ["png", "bmp"] 
 rayon = "1.12"
 
 # Used only by benchmarks and the library comparison tests, never by the
-# implementation: RustCrypto is the reference implementation that DES, ECB, CBC and
-# CTR are checked and timed against.
+# implementation: RustCrypto is the reference implementation that DES, AES, ECB,
+# CBC and CTR are checked and timed against.
 [dev-dependencies]
+aes = "0.9"
 cbc = "0.2"
 criterion = "0.8"
 ctr = "0.10"
@@ -37,6 +38,10 @@ bench = false
 name = "oes"
 path = "src/main.rs"
 bench = false
+
+[[bench]]
+name = "aes"
+harness = false
 
 [[bench]]
 name = "des"
