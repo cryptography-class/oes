@@ -325,3 +325,47 @@ fn pixel_encrypt_refuses_padding_with_ctr_and_gcm_with_des() {
         assert!(!setup.path("enc.png.pixmeta").exists(), "{flags:?}");
     }
 }
+
+/// `--threads` works on either side of the command name, and the pixel modes
+/// give the same image on several threads. 128x64 pixels are more than 1024
+/// blocks for both DES and AES, so the work splits into several pieces.
+#[test]
+fn pixel_round_trip_with_threads_before_and_after_the_command() {
+    let picture = image::RgbImage::from_fn(128, 64, |x, y| {
+        image::Rgb([(x * 37) as u8, (y * 91) as u8, (x * y + 11) as u8])
+    });
+    for algorithm in ["des", "aes128"] {
+        let setup = Setup::new("cli-pixels", algorithm);
+        let (input, encrypted, restored) = (
+            setup.path("in.png"),
+            setup.path("enc.png"),
+            setup.path("restored.png"),
+        );
+        picture.save(&input).unwrap();
+        for &mode in modes_for(algorithm) {
+            let context = format!("{algorithm} {mode}");
+            let mut args = ["--threads", "4", "pixel-encrypt", "-i"]
+                .map(OsStr::new)
+                .to_vec();
+            args.extend([input.as_os_str(), OsStr::new("-o"), encrypted.as_os_str()]);
+            args.extend([OsStr::new("-k"), setup.key.as_os_str()]);
+            args.extend(["-a", algorithm, "-m", mode, "--force"].map(OsStr::new));
+            assert_success(&oes(args), &context);
+
+            let mut args = vec![OsStr::new("pixel-decrypt"), OsStr::new("-i")];
+            args.extend([
+                encrypted.as_os_str(),
+                OsStr::new("-o"),
+                restored.as_os_str(),
+            ]);
+            args.extend([OsStr::new("-k"), setup.key.as_os_str()]);
+            args.extend(["--force", "--threads", "4"].map(OsStr::new));
+            assert_success(&oes(args), &context);
+            assert_eq!(
+                image::open(&restored).unwrap().to_rgb8(),
+                picture,
+                "{context}"
+            );
+        }
+    }
+}

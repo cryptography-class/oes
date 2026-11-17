@@ -33,8 +33,8 @@ pub fn run(cli: Cli) -> CliResult<()> {
         Command::Keygen(args) => keygen(&args),
         Command::Encrypt(args) => encrypt(&args, cli.threads),
         Command::Decrypt(args) => decrypt(&args, cli.threads),
-        Command::PixelEncrypt(args) => pixel_encrypt(&args),
-        Command::PixelDecrypt(args) => pixel_decrypt(&args),
+        Command::PixelEncrypt(args) => pixel_encrypt(&args, cli.threads),
+        Command::PixelDecrypt(args) => pixel_decrypt(&args, cli.threads),
     }
 }
 

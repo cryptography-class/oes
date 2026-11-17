@@ -21,6 +21,10 @@ use crate::stream::AtomicFile;
 /// files are written through [`AtomicFile`], and the metadata is committed
 /// first, so a failed run never leaves an encrypted image without its metadata.
 ///
+/// With `parallel`, the mode splits its work between the threads of the current
+/// Rayon pool, with the same output as on one thread. CBC encryption and the GHASH
+/// step of GCM always run on the calling thread.
+///
 /// # Errors
 ///
 /// - [`PixelError::Invalid`] if `output` and `meta_path` are the same path,
@@ -37,6 +41,7 @@ pub fn encrypt_image_file<C: BlockCipher>(
     overwrite: bool,
     cipher: C,
     params: PixelParams,
+    parallel: bool,
 ) -> Result<PixelMeta, PixelError> {
     if output == meta_path {
         return Err(PixelError::Invalid(
@@ -59,15 +64,19 @@ pub fn encrypt_image_file<C: BlockCipher>(
     let params = &meta.params;
     match (params.mode, params.padding) {
         (Mode::Ecb, Some(padding)) => {
-            meta.tail_block = encrypt_buffer(&mut Ecb::new(cipher), padding, &mut image)?;
+            let mut ecb = Ecb::new(cipher).parallel(parallel);
+            meta.tail_block = encrypt_buffer(&mut ecb, padding, &mut image)?;
         }
         (Mode::Cbc, Some(padding)) => {
-            let mut cbc = Cbc::new(cipher, &params.iv)?;
+            let mut cbc = Cbc::new(cipher, &params.iv)?.parallel(parallel);
             meta.tail_block = encrypt_buffer(&mut cbc, padding, &mut image)?;
         }
-        (Mode::Ctr, _) => Ctr::new(cipher, &params.iv)?.apply_keystream(&mut image)?,
+        (Mode::Ctr, _) => Ctr::new(cipher, &params.iv)?
+            .parallel(parallel)
+            .apply_keystream(&mut image)?,
         (Mode::Gcm, _) => {
-            let mut gcm = GcmEncryptor::new(cipher, &params.iv, &meta.fixed_bytes())?;
+            let mut gcm =
+                GcmEncryptor::new(cipher, &params.iv, &meta.fixed_bytes())?.parallel(parallel);
             gcm.update(&mut image)?;
             meta.tag = Some(gcm.finish());
         }
@@ -95,6 +104,10 @@ pub fn encrypt_image_file<C: BlockCipher>(
 /// error, and miss a wrong key unless the padding of an ECB or CBC tail block
 /// catches it. Nothing is written on failure.
 ///
+/// With `parallel`, the mode splits its work between the threads of the current
+/// Rayon pool, with the same output as on one thread. CBC encryption and the GHASH
+/// step of GCM always run on the calling thread.
+///
 /// # Errors
 ///
 /// - [`PixelError::Invalid`] if `output` doesn't end in `.png` or `.bmp`, or
@@ -113,6 +126,7 @@ pub fn decrypt_image_file<C: BlockCipher>(
     meta: &PixelMeta,
     overwrite: bool,
     cipher: C,
+    parallel: bool,
 ) -> Result<(), PixelError> {
     let format = output_format(output)?;
     meta.validate()?;
@@ -127,16 +141,20 @@ pub fn decrypt_image_file<C: BlockCipher>(
     }
     match (params.mode, params.padding, &meta.tag) {
         (Mode::Ecb, Some(padding), _) => {
-            decrypt_buffer(&mut Ecb::new(cipher), padding, &mut image, &meta.tail_block)?;
+            let mut ecb = Ecb::new(cipher).parallel(parallel);
+            decrypt_buffer(&mut ecb, padding, &mut image, &meta.tail_block)?;
         }
         (Mode::Cbc, Some(padding), _) => {
-            let mut cbc = Cbc::new(cipher, &params.iv)?;
+            let mut cbc = Cbc::new(cipher, &params.iv)?.parallel(parallel);
             decrypt_buffer(&mut cbc, padding, &mut image, &meta.tail_block)?;
         }
-        (Mode::Ctr, _, _) => Ctr::new(cipher, &params.iv)?.apply_keystream(&mut image)?,
+        (Mode::Ctr, _, _) => Ctr::new(cipher, &params.iv)?
+            .parallel(parallel)
+            .apply_keystream(&mut image)?,
         // The tag is checked before anything is encoded or written.
         (Mode::Gcm, _, Some(tag)) => {
-            let mut gcm = GcmDecryptor::new(cipher, &params.iv, &meta.fixed_bytes())?;
+            let mut gcm =
+                GcmDecryptor::new(cipher, &params.iv, &meta.fixed_bytes())?.parallel(parallel);
             gcm.update(&mut image)?;
             gcm.verify(tag)?;
         }

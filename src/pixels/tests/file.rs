@@ -43,11 +43,27 @@ fn encrypt_with(
     match mode {
         Mode::Gcm => {
             let cipher = Aes128Cipher::new(&AES_KEY);
-            encrypt_image_file(source, output, meta_path, false, cipher, params(mode))
+            encrypt_image_file(
+                source,
+                output,
+                meta_path,
+                false,
+                cipher,
+                params(mode),
+                false,
+            )
         }
         _ => {
             let cipher = DesCipher::new(&KEY);
-            encrypt_image_file(source, output, meta_path, false, cipher, params(mode))
+            encrypt_image_file(
+                source,
+                output,
+                meta_path,
+                false,
+                cipher,
+                params(mode),
+                false,
+            )
         }
     }
 }
@@ -55,10 +71,15 @@ fn encrypt_with(
 /// Decrypts with the right key for the cipher `meta` names.
 fn decrypt_with(input: &Path, output: &Path, meta: &PixelMeta) -> Result<(), PixelError> {
     match meta.params.algorithm {
-        Algorithm::Aes128 => {
-            decrypt_image_file(input, output, meta, false, Aes128Cipher::new(&AES_KEY))
-        }
-        _ => decrypt_image_file(input, output, meta, false, DesCipher::new(&KEY)),
+        Algorithm::Aes128 => decrypt_image_file(
+            input,
+            output,
+            meta,
+            false,
+            Aes128Cipher::new(&AES_KEY),
+            false,
+        ),
+        _ => decrypt_image_file(input, output, meta, false, DesCipher::new(&KEY), false),
     }
 }
 
@@ -131,6 +152,7 @@ fn encrypt_image_file_keeps_existing_outputs_unless_overwrite_is_set() {
             overwrite,
             DesCipher::new(&KEY),
             params(Mode::Ecb),
+            false,
         )
     };
 
@@ -173,6 +195,7 @@ fn encrypt_image_file_rejects_invalid_requests_before_any_output() {
             false,
             DesCipher::new(&KEY),
             params(Mode::Ecb),
+            false,
         );
         assert!(
             matches!(result, Err(PixelError::Invalid(_) | PixelError::Image(_))),
@@ -195,6 +218,7 @@ fn decrypt_image_file_with_a_wrong_key_fails_without_output() {
         &meta,
         false,
         DesCipher::new(&WRONG_KEY),
+        false,
     );
     assert!(
         matches!(
@@ -215,7 +239,7 @@ fn decrypt_image_file_rejects_an_image_of_another_size() {
     picture(6, 3).save(&other).unwrap();
 
     let restored = dir.path().join("dec.png");
-    let result = decrypt_image_file(&other, &restored, &meta, false, DesCipher::new(&KEY));
+    let result = decrypt_image_file(&other, &restored, &meta, false, DesCipher::new(&KEY), false);
     assert!(matches!(
         result,
         Err(PixelError::DimensionMismatch {
