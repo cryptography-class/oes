@@ -327,11 +327,13 @@ fn pixel_encrypt_refuses_padding_with_ctr_and_gcm_with_des() {
 }
 
 /// `--threads` works on either side of the command name, and the pixel modes
-/// give the same image on several threads. 128x64 pixels are more than 1024
-/// blocks for both DES and AES, so the work splits into several pieces.
+/// give the same image on several threads. 129x65 pixels are 25155 bytes: more
+/// than 1024 blocks for both DES and AES, so the work splits into several pieces,
+/// and 3 bytes past the last whole block, so a partial last block follows the
+/// threaded part.
 #[test]
 fn pixel_round_trip_with_threads_before_and_after_the_command() {
-    let picture = image::RgbImage::from_fn(128, 64, |x, y| {
+    let picture = image::RgbImage::from_fn(129, 65, |x, y| {
         image::Rgb([(x * 37) as u8, (y * 91) as u8, (x * y + 11) as u8])
     });
     for algorithm in ["des", "aes128"] {
