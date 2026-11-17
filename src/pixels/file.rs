@@ -7,7 +7,7 @@ use super::image_io::{encode, load_rgb, output_format};
 use super::meta::{PixelMeta, PixelParams};
 use crate::ciphers::traits::BlockCipher;
 use crate::container::Mode;
-use crate::modes::{Cbc, Ecb};
+use crate::modes::{Cbc, Ctr, Ecb, GcmDecryptor, GcmEncryptor};
 use crate::stream::AtomicFile;
 
 /// Encrypts the pixels of the image at `input`, writes a viewable image of the
@@ -15,6 +15,8 @@ use crate::stream::AtomicFile;
 /// `meta_path`, and returns that metadata.
 ///
 /// `cipher` must be built with the key; the mode and its IV come from `params`.
+/// For GCM, the tag goes into the metadata, and it also covers the metadata's
+/// settings and dimensions.
 /// The output format, PNG or BMP, comes from the extension of `output`. Both
 /// files are written through [`AtomicFile`], and the metadata is committed
 /// first, so a failed run never leaves an encrypted image without its metadata.
@@ -47,21 +49,30 @@ pub fn encrypt_image_file<C: BlockCipher>(
 
     let mut image = load_rgb(input)?;
     let (width, height) = image.dimensions();
-    let tail_block = match params.mode {
-        Mode::Ecb => encrypt_buffer(&mut Ecb::new(cipher), params.padding, &mut image)?,
-        Mode::Cbc => encrypt_buffer(
-            &mut Cbc::new(cipher, &params.iv)?,
-            params.padding,
-            &mut image,
-        )?,
-        Mode::Ctr | Mode::Gcm => return Err(unsupported_mode()),
-    };
-    let meta = PixelMeta {
+    let mut meta = PixelMeta {
         params,
         width,
         height,
-        tail_block,
+        tail_block: Vec::new(),
+        tag: None,
     };
+    let params = &meta.params;
+    match (params.mode, params.padding) {
+        (Mode::Ecb, Some(padding)) => {
+            meta.tail_block = encrypt_buffer(&mut Ecb::new(cipher), padding, &mut image)?;
+        }
+        (Mode::Cbc, Some(padding)) => {
+            let mut cbc = Cbc::new(cipher, &params.iv)?;
+            meta.tail_block = encrypt_buffer(&mut cbc, padding, &mut image)?;
+        }
+        (Mode::Ctr, _) => Ctr::new(cipher, &params.iv)?.apply_keystream(&mut image)?,
+        (Mode::Gcm, _) => {
+            let mut gcm = GcmEncryptor::new(cipher, &params.iv, &meta.fixed_bytes())?;
+            gcm.update(&mut image)?;
+            meta.tag = Some(gcm.finish());
+        }
+        (Mode::Ecb | Mode::Cbc, None) => return Err(missing_padding()),
+    }
     let encoded = encode(&image, format)?;
 
     let mut image_file = AtomicFile::create(output, overwrite)?;
@@ -77,15 +88,19 @@ pub fn encrypt_image_file<C: BlockCipher>(
 /// `output`, whose extension picks PNG or BMP.
 ///
 /// `cipher` must be built with the key; the mode and its IV come from `meta`.
-/// The input must be the unchanged encrypted image: a changed pixel decrypts to
-/// wrong pixels without an error, and with a block-aligned image a wrong key goes
-/// unnoticed. Nothing is written on failure.
+/// The input must be the unchanged encrypted image. GCM checks its tag before
+/// anything is written, so a changed pixel or metadata field, or a wrong key, is
+/// refused. The other modes decrypt a changed pixel to wrong pixels without an
+/// error, and miss a wrong key unless the padding of an ECB or CBC tail block
+/// catches it. Nothing is written on failure.
 ///
 /// # Errors
 ///
 /// - [`PixelError::Invalid`] if `output` doesn't end in `.png` or `.bmp`, or
 ///   `cipher`'s block size doesn't match the metadata.
 /// - The errors of [`PixelMeta::validate`] and [`decrypt_buffer`].
+/// - [`PixelError::Mode`] with [`ModeError::AuthenticationFailed`](crate::modes::errors::ModeError::AuthenticationFailed)
+///   if the GCM tag doesn't match.
 /// - [`PixelError::Image`] if `input` can't be decoded.
 /// - [`PixelError::DimensionMismatch`] if the image doesn't have the dimensions in
 ///   `meta`.
@@ -109,20 +124,25 @@ pub fn decrypt_image_file<C: BlockCipher>(
     if actual != expected {
         return Err(PixelError::DimensionMismatch { expected, actual });
     }
-    match params.mode {
-        Mode::Ecb => decrypt_buffer(
-            &mut Ecb::new(cipher),
-            params.padding,
-            &mut image,
-            &meta.tail_block,
-        )?,
-        Mode::Cbc => decrypt_buffer(
-            &mut Cbc::new(cipher, &params.iv)?,
-            params.padding,
-            &mut image,
-            &meta.tail_block,
-        )?,
-        Mode::Ctr | Mode::Gcm => return Err(unsupported_mode()),
+    match (params.mode, params.padding, &meta.tag) {
+        (Mode::Ecb, Some(padding), _) => {
+            decrypt_buffer(&mut Ecb::new(cipher), padding, &mut image, &meta.tail_block)?;
+        }
+        (Mode::Cbc, Some(padding), _) => {
+            let mut cbc = Cbc::new(cipher, &params.iv)?;
+            decrypt_buffer(&mut cbc, padding, &mut image, &meta.tail_block)?;
+        }
+        (Mode::Ctr, _, _) => Ctr::new(cipher, &params.iv)?.apply_keystream(&mut image)?,
+        // The tag is checked before anything is encoded or written.
+        (Mode::Gcm, _, Some(tag)) => {
+            let mut gcm = GcmDecryptor::new(cipher, &params.iv, &meta.fixed_bytes())?;
+            gcm.update(&mut image)?;
+            gcm.verify(tag)?;
+        }
+        (Mode::Ecb | Mode::Cbc, None, _) => return Err(missing_padding()),
+        (Mode::Gcm, _, None) => {
+            return Err(PixelError::Invalid("the metadata holds no GCM tag"));
+        }
     }
     let encoded = encode(&image, format)?;
 
@@ -142,7 +162,8 @@ fn check_block_size<C: BlockCipher>(params: &PixelParams) -> Result<(), PixelErr
     Ok(())
 }
 
-/// The error for CTR and GCM, which [`PixelParams::validate`] already refuses.
-fn unsupported_mode() -> PixelError {
-    PixelError::Invalid("pixel encryption supports ECB and CBC only")
+/// The error for ECB or CBC without padding, which [`PixelParams::validate`]
+/// already refuses.
+fn missing_padding() -> PixelError {
+    PixelError::Invalid("ECB and CBC need a padding scheme")
 }

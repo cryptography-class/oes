@@ -8,6 +8,9 @@ pub const KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 /// `KEY` with one bit of its last byte changed, keeping odd parity.
 pub const WRONG_KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xE0];
 pub const IV: [u8; 8] = [9, 8, 7, 6, 5, 4, 3, 2];
+/// An AES-128 key, for GCM, which needs a 16-byte block.
+pub const AES_KEY: [u8; 16] = [0x2B; 16];
+pub const NONCE: [u8; 12] = [0x5A; 12];
 
 pub const PADDINGS: [Padding; 4] = [
     Padding::Pkcs7,
@@ -16,11 +19,13 @@ pub const PADDINGS: [Padding; 4] = [
     Padding::AnsiX923(Fill::Random),
 ];
 
-/// Returns the IV a mode takes: `IV` for CBC, none for ECB.
+/// Returns the IV a mode takes: none for ECB, `IV` for CBC and CTR (a DES
+/// block), `NONCE` for GCM.
 pub fn iv_for(mode: Mode) -> Vec<u8> {
     match mode {
-        Mode::Cbc => IV.to_vec(),
-        _ => Vec::new(),
+        Mode::Ecb => Vec::new(),
+        Mode::Cbc | Mode::Ctr => IV.to_vec(),
+        Mode::Gcm => NONCE.to_vec(),
     }
 }
 

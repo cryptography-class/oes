@@ -7,7 +7,6 @@ use oes::ciphers::des::DesCipher;
 use oes::ciphers::traits::KeyInit;
 use oes::container::{Algorithm, Mode};
 use oes::keys::Key;
-use oes::padding::Padding;
 use oes::pixels::{
     PixelMeta, PixelParams, count_distinct_blocks, decrypt_image_file, default_meta_path,
     encrypt_image_file, load_rgb,
@@ -15,14 +14,12 @@ use oes::pixels::{
 use oes::random::random_bytes;
 
 use super::args::{PixelDecryptArgs, PixelEncryptArgs};
-use super::commands::{CliResult, cipher_name, file_with_size, print_table, seconds};
+use super::commands::{CliResult, cipher_name, file_with_size, padding_for, print_table, seconds};
 
 pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
-    if !matches!(mode, Mode::Ecb | Mode::Cbc) {
-        return Err("pixel encryption supports ECB and CBC only".into());
-    }
+    let padding = padding_for(mode, args.padding)?;
     let meta_path = args
         .meta
         .clone()
@@ -31,7 +28,7 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     let params = PixelParams {
         algorithm,
         mode,
-        padding: Padding::from(args.padding),
+        padding,
         iv: random_bytes(mode.iv_len(algorithm))?,
     };
 
@@ -68,10 +65,7 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
             ),
             ("Output", file_with_size(&args.output)?),
             ("Metadata", file_with_size(&meta_path)?),
-            (
-                "Cipher",
-                cipher_name(algorithm, mode, Some(meta.params.padding)),
-            ),
+            ("Cipher", cipher_name(algorithm, mode, meta.params.padding)),
             ("Blocks", format!("{distinct} distinct of {total}")),
             ("Time", seconds(elapsed)),
         ],
@@ -120,11 +114,7 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
             ("Metadata", meta_path.display().to_string()),
             (
                 "Cipher",
-                cipher_name(
-                    meta.params.algorithm,
-                    meta.params.mode,
-                    Some(meta.params.padding),
-                ),
+                cipher_name(meta.params.algorithm, meta.params.mode, meta.params.padding),
             ),
             ("Time", seconds(elapsed)),
         ],

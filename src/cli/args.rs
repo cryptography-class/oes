@@ -124,12 +124,13 @@ pub struct PixelEncryptArgs {
     /// Encryption algorithm.
     #[arg(short, long, value_enum, default_value = "des")]
     pub algorithm: AlgorithmArg,
-    /// Mode of operation: ECB or CBC.
+    /// Mode of operation.
     #[arg(short, long, value_enum)]
     pub mode: ModeArg,
-    /// Padding scheme for the last partial block.
-    #[arg(short, long, value_enum, default_value = "pkcs7")]
-    pub padding: PaddingArg,
+    /// Padding scheme for the last partial block in ECB and CBC [default: pkcs7].
+    /// Not allowed with CTR or GCM.
+    #[arg(short, long, value_enum)]
+    pub padding: Option<PaddingArg>,
     /// Replace the output files if they exist.
     #[arg(long)]
     pub force: bool,

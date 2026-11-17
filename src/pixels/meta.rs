@@ -5,17 +5,20 @@
 //! 0       4     magic "OESP"
 //! 4       1     format version (1)
 //! 5       1     algorithm   (container codes: 1 DES, 2 AES-128, 3 AES-192, 4 AES-256)
-//! 6       1     mode        (container codes: 1 ECB, 2 CBC)
-//! 7       1     padding     (container codes 1 to 4; 0, no padding, is invalid here)
+//! 6       1     mode        (container codes: 1 ECB, 2 CBC, 3 CTR, 4 GCM)
+//! 7       1     padding     (container codes: 1 to 4 for ECB and CBC, 0 for CTR and GCM)
 //! 8       4     width in pixels,  u32 big-endian
 //! 12      4     height in pixels, u32 big-endian
-//! 16      n     IV: n = 0 for ECB, one block for CBC
-//! 16+n    t     encrypted tail block: t = 0 if width * height * 3 is a multiple
-//!               of the block size, otherwise one block
+//! 16      n     IV: n = 0 for ECB, one block for CBC and CTR, 12 bytes for GCM
+//! 16+n    t     encrypted tail block, ECB and CBC only: t = 0 if
+//!               width * height * 3 is a multiple of the block size, otherwise
+//!               one block
+//! 16+n+t  g     tag: g = 16 for GCM, 0 otherwise
 //! ```
 //!
-//! The IV and tail lengths aren't stored, because the other fields determine
-//! them. The pixel format is always 8-bit RGB. The key is never stored.
+//! The IV, tail and tag lengths aren't stored, because the other fields determine
+//! them. For GCM, the first 16 bytes are the AAD, so changing any of them fails
+//! authentication. The pixel format is always 8-bit RGB. The key is never stored.
 
 use std::fs;
 use std::io::{Cursor, ErrorKind, Read, Write};
@@ -23,6 +26,7 @@ use std::path::Path;
 
 use super::errors::PixelError;
 use crate::container::{Algorithm, Header, ImageType, Mode, padding_from_byte, padding_to_byte};
+use crate::modes::gcm::TAG_LEN;
 use crate::padding::Padding;
 
 const MAGIC: [u8; 4] = *b"OESP";
@@ -36,10 +40,10 @@ const BYTES_PER_PIXEL: u128 = 3;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PixelParams {
     pub algorithm: Algorithm,
-    /// ECB or CBC.
     pub mode: Mode,
-    pub padding: Padding,
-    /// One block for CBC, empty for ECB.
+    /// Required for ECB and CBC, absent for CTR and GCM.
+    pub padding: Option<Padding>,
+    /// Empty for ECB, one block for CBC and CTR, the 12-byte nonce for GCM.
     pub iv: Vec<u8>,
 }
 
@@ -49,21 +53,14 @@ impl PixelParams {
     ///
     /// # Errors
     ///
-    /// - [`PixelError::Invalid`] for CTR or GCM, which pixel encryption doesn't
-    ///   support.
-    /// - [`PixelError::Container`] if the IV length or padding doesn't fit, as in
-    ///   [`Header::validate`].
+    /// [`PixelError::Container`] if the padding, IV length or algorithm doesn't
+    /// fit the mode, as in [`Header::validate`].
     pub fn validate(&self) -> Result<(), PixelError> {
-        if !matches!(self.mode, Mode::Ecb | Mode::Cbc) {
-            return Err(PixelError::Invalid(
-                "pixel encryption supports ECB and CBC only",
-            ));
-        }
         Header {
             image_type: ImageType::Unknown,
             algorithm: self.algorithm,
             mode: self.mode,
-            padding: Some(self.padding),
+            padding: self.padding,
             iv: self.iv.clone(),
             original_len: 0,
         }
@@ -72,16 +69,18 @@ impl PixelParams {
     }
 }
 
-/// The content of a metadata file: the settings, the image dimensions and the
-/// encrypted tail block.
+/// The content of a metadata file: the settings, the image dimensions, the
+/// encrypted tail block and the GCM tag.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PixelMeta {
     pub params: PixelParams,
     pub width: u32,
     pub height: u32,
     /// The encrypted, padded last partial block; empty if the pixel data is
-    /// block-aligned.
+    /// block-aligned, and always empty for CTR and GCM.
     pub tail_block: Vec<u8>,
+    /// The authentication tag; present for GCM only.
+    pub tag: Option<[u8; TAG_LEN]>,
 }
 
 impl PixelMeta {
@@ -91,25 +90,27 @@ impl PixelMeta {
         u128::from(self.width) * u128::from(self.height) * BYTES_PER_PIXEL
     }
 
-    /// Returns the tail block length the dimensions call for: 0 if the pixel data
-    /// is block-aligned, otherwise one block.
+    /// Returns the tail block length the mode and dimensions call for: one block
+    /// for ECB and CBC when the pixel data isn't block-aligned, otherwise 0.
     pub fn expected_tail_len(&self) -> usize {
         let block_size = self.params.algorithm.block_size();
-        if self.pixel_len().is_multiple_of(block_size as u128) {
+        let padded = matches!(self.params.mode, Mode::Ecb | Mode::Cbc);
+        if !padded || self.pixel_len().is_multiple_of(block_size as u128) {
             0
         } else {
             block_size
         }
     }
 
-    /// Checks the settings, that neither dimension is zero, and that the tail
-    /// block has [`expected_tail_len`](Self::expected_tail_len) bytes.
-    /// [`write_to`](Self::write_to) and [`read_from`](Self::read_from) both call it.
+    /// Checks the settings, that neither dimension is zero, that the tail block
+    /// has [`expected_tail_len`](Self::expected_tail_len) bytes, and that there is
+    /// a tag for GCM and none otherwise. [`write_to`](Self::write_to) and
+    /// [`read_from`](Self::read_from) both call it.
     ///
     /// # Errors
     ///
-    /// [`PixelError::Invalid`] for a zero dimension or a wrong tail length, and the
-    /// errors of [`PixelParams::validate`].
+    /// [`PixelError::Invalid`] for a zero dimension, a wrong tail length or a
+    /// missing or extra tag, and the errors of [`PixelParams::validate`].
     pub fn validate(&self) -> Result<(), PixelError> {
         self.params.validate()?;
         if self.width == 0 || self.height == 0 {
@@ -120,7 +121,26 @@ impl PixelMeta {
                 "the tail block in the metadata doesn't fit the image size",
             ));
         }
+        if self.tag.is_some() != (self.params.mode == Mode::Gcm) {
+            return Err(PixelError::Invalid(
+                "the metadata must hold a tag for GCM and only for GCM",
+            ));
+        }
         Ok(())
+    }
+
+    /// Returns the fields before the IV, as the format lays them out. For GCM
+    /// they are the AAD, so the tag also covers the settings and the dimensions.
+    pub(super) fn fixed_bytes(&self) -> [u8; FIXED_LEN] {
+        let mut fixed = [0u8; FIXED_LEN];
+        fixed[..4].copy_from_slice(&MAGIC);
+        fixed[4] = VERSION;
+        fixed[5] = self.params.algorithm.to_byte();
+        fixed[6] = self.params.mode.to_byte();
+        fixed[7] = padding_to_byte(self.params.padding);
+        fixed[8..12].copy_from_slice(&self.width.to_be_bytes());
+        fixed[12..].copy_from_slice(&self.height.to_be_bytes());
+        fixed
     }
 
     /// Validates the metadata and writes it. Nothing is written if validation fails.
@@ -131,17 +151,12 @@ impl PixelMeta {
     /// writing fails.
     pub fn write_to<W: Write + ?Sized>(&self, writer: &mut W) -> Result<(), PixelError> {
         self.validate()?;
-        let mut fixed = [0u8; FIXED_LEN];
-        fixed[..4].copy_from_slice(&MAGIC);
-        fixed[4] = VERSION;
-        fixed[5] = self.params.algorithm.to_byte();
-        fixed[6] = self.params.mode.to_byte();
-        fixed[7] = padding_to_byte(Some(self.params.padding));
-        fixed[8..12].copy_from_slice(&self.width.to_be_bytes());
-        fixed[12..].copy_from_slice(&self.height.to_be_bytes());
-        writer.write_all(&fixed)?;
+        writer.write_all(&self.fixed_bytes())?;
         writer.write_all(&self.params.iv)?;
         writer.write_all(&self.tail_block)?;
+        if let Some(tag) = &self.tag {
+            writer.write_all(tag)?;
+        }
         Ok(())
     }
 
@@ -154,8 +169,7 @@ impl PixelMeta {
     /// - [`PixelError::BadMagic`] if the signature is wrong.
     /// - [`PixelError::UnsupportedVersion`] for any version but 1.
     /// - [`PixelError::Container`] for an unknown algorithm, mode or padding code.
-    /// - [`PixelError::Invalid`] for no padding, and the errors of
-    ///   [`validate`](Self::validate).
+    /// - The errors of [`validate`](Self::validate).
     /// - [`PixelError::Io`] if reading fails.
     pub fn read_from<R: Read + ?Sized>(reader: &mut R) -> Result<Self, PixelError> {
         let mut fixed = [0u8; FIXED_LEN];
@@ -168,9 +182,7 @@ impl PixelMeta {
         }
         let algorithm = Algorithm::from_byte(fixed[5])?;
         let mode = Mode::from_byte(fixed[6])?;
-        let padding = padding_from_byte(fixed[7])?.ok_or(PixelError::Invalid(
-            "pixel metadata must name a padding scheme",
-        ))?;
+        let padding = padding_from_byte(fixed[7])?;
         let mut width = [0u8; 4];
         width.copy_from_slice(&fixed[8..12]);
         let mut height = [0u8; 4];
@@ -188,11 +200,17 @@ impl PixelMeta {
             width: u32::from_be_bytes(width),
             height: u32::from_be_bytes(height),
             tail_block: Vec::new(),
+            tag: None,
         };
-        // CTR and GCM are refused before the tail length is used.
+        // Invalid settings are refused before the tail and tag lengths are used.
         meta.params.validate()?;
         meta.tail_block = vec![0u8; meta.expected_tail_len()];
         read_exact_or_truncated(reader, &mut meta.tail_block)?;
+        if meta.params.mode == Mode::Gcm {
+            let mut tag = [0u8; TAG_LEN];
+            read_exact_or_truncated(reader, &mut tag)?;
+            meta.tag = Some(tag);
+        }
         meta.validate()?;
         Ok(meta)
     }

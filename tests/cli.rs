@@ -263,14 +263,14 @@ fn decrypt_of_a_changed_gcm_container_fails_without_output() {
 // ---- pixel-encrypt and pixel-decrypt ----
 
 #[test]
-fn pixel_round_trip_restores_the_image_for_ecb_and_cbc() {
+fn pixel_round_trip_restores_the_image_in_every_mode() {
     // 7x5 pixels are 105 bytes, so the last block is partial.
     let picture = image::RgbImage::from_fn(7, 5, |x, y| {
         image::Rgb([(x * 37) as u8, (y * 91) as u8, (x * y + 11) as u8])
     });
     for algorithm in ALGORITHMS {
         let setup = Setup::new("cli-pixels", algorithm);
-        for mode in ["ecb", "cbc"] {
+        for &mode in modes_for(algorithm) {
             for extension in ["png", "bmp"] {
                 let context = format!("{algorithm} {mode}, {extension}");
                 let input = setup.path(&format!("in.{extension}"));
@@ -306,5 +306,22 @@ fn pixel_round_trip_restores_the_image_for_ecb_and_cbc() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn pixel_encrypt_refuses_padding_with_ctr_and_gcm_with_des() {
+    let setup = Setup::new("cli-pixels", "des");
+    let input = setup.path("in.png");
+    image::RgbImage::new(4, 4).save(&input).unwrap();
+    let encrypted = setup.path("enc.png");
+    for flags in [["-m", "ctr", "-p", "pkcs7"].as_slice(), &["-m", "gcm"]] {
+        let mut args = vec![OsStr::new("pixel-encrypt"), OsStr::new("-i")];
+        args.extend([input.as_os_str(), OsStr::new("-o"), encrypted.as_os_str()]);
+        args.extend([OsStr::new("-k"), setup.key.as_os_str()]);
+        args.extend(flags.iter().map(OsStr::new));
+        assert!(!oes(args).status.success(), "{flags:?}");
+        assert!(!encrypted.exists(), "{flags:?}");
+        assert!(!setup.path("enc.png.pixmeta").exists(), "{flags:?}");
     }
 }

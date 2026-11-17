@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let params = PixelParams {
             algorithm: Algorithm::Des,
             mode,
-            padding: Padding::Pkcs7,
+            padding: Some(Padding::Pkcs7),
             iv: random_bytes(mode.iv_len(Algorithm::Des))?,
         };
         let output = out_dir.join(format!("original_{name}.png"));

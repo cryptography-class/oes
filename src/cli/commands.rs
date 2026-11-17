@@ -18,7 +18,7 @@ use oes::stream::{
     encrypt_gcm_stream, encrypt_stream,
 };
 
-use super::args::{Cli, Command, DecryptArgs, EncryptArgs, KeygenArgs};
+use super::args::{Cli, Command, DecryptArgs, EncryptArgs, KeygenArgs, PaddingArg};
 use super::memory::peak_heap_bytes;
 use super::pixel::{pixel_decrypt, pixel_encrypt};
 
@@ -56,13 +56,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
     let started = Instant::now();
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
-    let padding = match (mode, args.padding) {
-        (Mode::Ctr | Mode::Gcm, Some(_)) => {
-            return Err("CTR and GCM take no padding, so leave out -p".into());
-        }
-        (Mode::Ctr | Mode::Gcm, None) => None,
-        (_, padding) => Some(padding.map_or(Padding::Pkcs7, Padding::from)),
-    };
+    let padding = padding_for(mode, args.padding)?;
     let buffer_size = args.buffer_size as usize;
 
     let mut input = File::open(&args.input).map_err(|e| with_path(&args.input, e))?;
@@ -491,6 +485,18 @@ fn algorithm_name(algorithm: Algorithm) -> &'static str {
         Algorithm::Aes128 => "AES-128",
         Algorithm::Aes192 => "AES-192",
         Algorithm::Aes256 => "AES-256",
+    }
+}
+
+/// Returns the padding for `mode`: PKCS#7 unless `-p` names another for ECB and
+/// CBC, and none for CTR and GCM, which refuse `-p`.
+pub(super) fn padding_for(mode: Mode, arg: Option<PaddingArg>) -> CliResult<Option<Padding>> {
+    match (mode, arg) {
+        (Mode::Ctr | Mode::Gcm, Some(_)) => {
+            Err("CTR and GCM take no padding, so leave out -p".into())
+        }
+        (Mode::Ctr | Mode::Gcm, None) => Ok(None),
+        (Mode::Ecb | Mode::Cbc, arg) => Ok(Some(arg.map_or(Padding::Pkcs7, Padding::from))),
     }
 }
 
