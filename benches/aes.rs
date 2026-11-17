@@ -1,14 +1,16 @@
 //! Benchmarks of the AES cipher and its modes in memory, with no file I/O: the
-//! time spent on cryptography alone. The RustCrypto crates `aes`, `ecb`, `cbc` and
-//! `ctr` are benchmarked alongside as the reference implementation, under names
-//! prefixed with `rustcrypto-`. RustCrypto uses the processor's AES instructions
+//! time spent on cryptography alone. The RustCrypto crates `aes`, `ecb`, `cbc`,
+//! `ctr` and `aes-gcm` are benchmarked alongside as the reference implementation,
+//! under names prefixed with `rustcrypto-`. RustCrypto uses the processor's AES instructions
 //! when it has them, so the gap to the textbook implementation is large.
 //!
 //! Groups:
 //! - `aes-block`: encryption and decryption of one block, and the key schedule,
 //!   for each key size.
 //! - `aes-mode-encrypt` and `aes-mode-decrypt`: AES-128 in ECB, CBC and CTR over
-//!   each of the shared input sizes, in place on one buffer.
+//!   each of the shared input sizes, in place on one buffer. GCM is only in
+//!   `aes-mode-encrypt`: decryption does the same work, and the in-place buffer
+//!   would no longer match its tag after the first run.
 //!
 //! ECB is insecure and must not be used to protect real data.
 
@@ -22,12 +24,14 @@ use aes::cipher::{
     BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit,
     StreamCipher,
 };
+use aes_gcm::Aes128Gcm;
+use aes_gcm::aead::AeadInOut;
 use common::{SIZES, id, payload, set_size, size_group};
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::traits::KeyInit;
-use oes::modes::{Cbc, Ctr, Ecb};
+use oes::modes::{Cbc, Ctr, Ecb, GcmEncryptor};
 
 /// A fixed key and IV: the 256-bit key of NIST SP 800-38A Appendix F, whose first
 /// 16 or 24 bytes key AES-128 and AES-192, and the IV from the same appendix.
@@ -39,6 +43,11 @@ const KEY: [u8; 32] = [
 ];
 const IV: [u8; 16] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+];
+
+/// The GCM nonce: the first 12 bytes of [`IV`], with the same caveat.
+const NONCE: [u8; 12] = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
 ];
 
 /// The block that the single-block benchmarks start from (FIPS 197 Appendix C).
@@ -158,6 +167,17 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             || Ctr::new(Aes128Cipher::new(&key), &IV).unwrap(),
             |mut mode, data| mode.apply_keystream(data).unwrap(),
         );
+        bench_in_place(
+            &mut group,
+            "gcm",
+            &label,
+            buf,
+            || GcmEncryptor::new(Aes128Cipher::new(&key), &NONCE, &[]).unwrap(),
+            |mut mode, data| {
+                mode.update(data).unwrap();
+                black_box(mode.finish());
+            },
+        );
 
         bench_in_place(
             &mut group,
@@ -188,6 +208,17 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             buf,
             || ctr::Ctr128BE::<aes::Aes128>::new(&key.into(), &IV.into()),
             |mut mode, data| mode.apply_keystream(data),
+        );
+        bench_in_place(
+            &mut group,
+            "rustcrypto-gcm",
+            &label,
+            buf,
+            || <Aes128Gcm as aes_gcm::KeyInit>::new(&key.into()),
+            |mode, data| {
+                let tag = mode.encrypt_inout_detached(&NONCE.into(), &[], data.into());
+                black_box(tag.unwrap());
+            },
         );
     }
     group.finish();
