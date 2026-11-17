@@ -16,7 +16,7 @@ use oes::random::random_bytes;
 use super::args::{PixelDecryptArgs, PixelEncryptArgs};
 use super::commands::{CliResult, cipher_name, file_with_size, padding_for, print_table, seconds};
 
-pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
+pub(super) fn pixel_encrypt(args: &PixelEncryptArgs, threads: u16) -> CliResult<()> {
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
     let padding = padding_for(mode, args.padding)?;
@@ -33,23 +33,23 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     };
 
     let started = Instant::now();
-    let (input, output, force) = (&args.input, &args.output, args.force);
+    let (input, output, force, parallel) = (&args.input, &args.output, args.force, threads > 1);
     let meta = match algorithm {
         Algorithm::Des => {
             let cipher = DesCipher::new(key.as_array::<8>()?);
-            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+            encrypt_image_file(input, output, &meta_path, force, cipher, params, parallel)
         }
         Algorithm::Aes128 => {
             let cipher = Aes128Cipher::new(key.as_array::<16>()?);
-            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+            encrypt_image_file(input, output, &meta_path, force, cipher, params, parallel)
         }
         Algorithm::Aes192 => {
             let cipher = Aes192Cipher::new(key.as_array::<24>()?);
-            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+            encrypt_image_file(input, output, &meta_path, force, cipher, params, parallel)
         }
         Algorithm::Aes256 => {
             let cipher = Aes256Cipher::new(key.as_array::<32>()?);
-            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+            encrypt_image_file(input, output, &meta_path, force, cipher, params, parallel)
         }
     }?;
     let elapsed = started.elapsed();
@@ -67,13 +67,14 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
             ("Metadata", file_with_size(&meta_path)?),
             ("Cipher", cipher_name(algorithm, mode, meta.params.padding)),
             ("Blocks", format!("{distinct} distinct of {total}")),
+            ("Threads", threads.to_string()),
             ("Time", seconds(elapsed)),
         ],
     );
     Ok(())
 }
 
-pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
+pub(super) fn pixel_decrypt(args: &PixelDecryptArgs, threads: u16) -> CliResult<()> {
     let meta_path = args
         .meta
         .clone()
@@ -82,23 +83,23 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
     let key = Key::load(meta.params.algorithm, &args.key)?;
 
     let started = Instant::now();
-    let (input, output, force) = (&args.input, &args.output, args.force);
+    let (input, output, force, parallel) = (&args.input, &args.output, args.force, threads > 1);
     match meta.params.algorithm {
         Algorithm::Des => {
             let cipher = DesCipher::new(key.as_array::<8>()?);
-            decrypt_image_file(input, output, &meta, force, cipher)
+            decrypt_image_file(input, output, &meta, force, cipher, parallel)
         }
         Algorithm::Aes128 => {
             let cipher = Aes128Cipher::new(key.as_array::<16>()?);
-            decrypt_image_file(input, output, &meta, force, cipher)
+            decrypt_image_file(input, output, &meta, force, cipher, parallel)
         }
         Algorithm::Aes192 => {
             let cipher = Aes192Cipher::new(key.as_array::<24>()?);
-            decrypt_image_file(input, output, &meta, force, cipher)
+            decrypt_image_file(input, output, &meta, force, cipher, parallel)
         }
         Algorithm::Aes256 => {
             let cipher = Aes256Cipher::new(key.as_array::<32>()?);
-            decrypt_image_file(input, output, &meta, force, cipher)
+            decrypt_image_file(input, output, &meta, force, cipher, parallel)
         }
     }?;
     let elapsed = started.elapsed();
@@ -116,6 +117,7 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
                 "Cipher",
                 cipher_name(meta.params.algorithm, meta.params.mode, meta.params.padding),
             ),
+            ("Threads", threads.to_string()),
             ("Time", seconds(elapsed)),
         ],
     );

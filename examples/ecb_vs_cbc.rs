@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             true,
             DesCipher::new(key.as_array::<8>()?),
             params,
+            false,
         )?;
 
         let encrypted = load_rgb(&output)?;

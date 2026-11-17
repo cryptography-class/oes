@@ -28,12 +28,13 @@ const MIB: f64 = 1024.0 * 1024.0;
 
 /// Runs the parsed command.
 pub fn run(cli: Cli) -> CliResult<()> {
+    start_threads(cli.threads)?;
     match cli.command {
         Command::Keygen(args) => keygen(&args),
-        Command::Encrypt(args) => encrypt(&args),
-        Command::Decrypt(args) => decrypt(&args),
-        Command::PixelEncrypt(args) => pixel_encrypt(&args),
-        Command::PixelDecrypt(args) => pixel_decrypt(&args),
+        Command::Encrypt(args) => encrypt(&args, cli.threads),
+        Command::Decrypt(args) => decrypt(&args, cli.threads),
+        Command::PixelEncrypt(args) => pixel_encrypt(&args, cli.threads),
+        Command::PixelDecrypt(args) => pixel_decrypt(&args, cli.threads),
     }
 }
 
@@ -51,8 +52,8 @@ fn keygen(args: &KeygenArgs) -> CliResult<()> {
     Ok(())
 }
 
-fn encrypt(args: &EncryptArgs) -> CliResult<()> {
-    let parallel = start_threads(args.threads)?;
+fn encrypt(args: &EncryptArgs, threads: u16) -> CliResult<()> {
+    let parallel = threads > 1;
     let started = Instant::now();
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
@@ -117,7 +118,7 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
                 cipher_name(header.algorithm, header.mode, header.padding),
             ),
             ("Buffer", format!("{buffer_size} bytes")),
-            ("Threads", args.threads.to_string()),
+            ("Threads", threads.to_string()),
             ("Time", seconds(elapsed)),
             ("Throughput", throughput(original_len, elapsed)),
             ("Peak heap", mib(peak_heap_bytes() as u64)),
@@ -126,8 +127,8 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
     Ok(())
 }
 
-fn decrypt(args: &DecryptArgs) -> CliResult<()> {
-    let parallel = start_threads(args.threads)?;
+fn decrypt(args: &DecryptArgs, threads: u16) -> CliResult<()> {
+    let parallel = threads > 1;
     let started = Instant::now();
     let buffer_size = args.buffer_size as usize;
 
@@ -165,7 +166,7 @@ fn decrypt(args: &DecryptArgs) -> CliResult<()> {
                 cipher_name(header.algorithm, header.mode, header.padding),
             ),
             ("Buffer", format!("{buffer_size} bytes")),
-            ("Threads", args.threads.to_string()),
+            ("Threads", threads.to_string()),
             ("Time", seconds(elapsed)),
             ("Throughput", throughput(header.original_len, elapsed)),
             ("Peak heap", mib(peak_heap_bytes() as u64)),
@@ -174,17 +175,15 @@ fn decrypt(args: &DecryptArgs) -> CliResult<()> {
     Ok(())
 }
 
-/// Sets up the global Rayon pool with `threads` threads, and returns whether the
-/// modes should run in parallel. One thread builds no pool and keeps the modes on
-/// the calling thread.
-fn start_threads(threads: u16) -> CliResult<bool> {
-    if threads == 1 {
-        return Ok(false);
+/// Sets up the global Rayon pool with `threads` threads. One thread builds no
+/// pool, and the modes then stay on the calling thread.
+fn start_threads(threads: u16) -> CliResult<()> {
+    if threads > 1 {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads.into())
+            .build_global()?;
     }
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(threads.into())
-        .build_global()?;
-    Ok(true)
+    Ok(())
 }
 
 /// Which way data goes through the cipher.

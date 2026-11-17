@@ -14,6 +14,13 @@ use oes::stream::{DEFAULT_BUFFER_SIZE, MAX_BUFFER_SIZE};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+    /// Number of threads, accepted before or after the command name.
+    ///
+    /// Used by ECB, CBC decryption, CTR and the counter step of GCM. CBC
+    /// encryption and GCM authentication always use one.
+    #[arg(long, global = true, default_value_t = 1,
+          value_parser = clap::value_parser!(u16).range(1..=256))]
+    pub threads: u16,
 }
 
 #[derive(Subcommand)]
@@ -69,10 +76,6 @@ pub struct EncryptArgs {
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
-    /// Number of threads for ECB, CBC decryption, CTR and the counter step of GCM.
-    /// CBC encryption and GCM authentication always use one.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
-    pub threads: u16,
     /// After encrypting, decrypt the result and compare it with the input.
     #[arg(long)]
     pub verify: bool,
@@ -97,10 +100,6 @@ pub struct DecryptArgs {
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
-    /// Number of threads for ECB, CBC decryption, CTR and the counter step of GCM.
-    /// CBC encryption and GCM authentication always use one.
-    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
-    pub threads: u16,
     /// Replace the output file if it exists.
     #[arg(long)]
     pub force: bool,
