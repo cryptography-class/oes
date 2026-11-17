@@ -30,7 +30,7 @@ pub fn des_mode(mode: Mode, key: &[u8; 8]) -> Box<dyn BlockMode> {
     match mode {
         Mode::Ecb => Box::new(Ecb::new(cipher)),
         Mode::Cbc => Box::new(Cbc::new(cipher, &IV).unwrap()),
-        Mode::Ctr => panic!("pixel tests use ECB and CBC only"),
+        Mode::Ctr | Mode::Gcm => panic!("pixel tests use ECB and CBC only"),
     }
 }
 

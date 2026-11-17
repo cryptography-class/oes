@@ -62,15 +62,15 @@ pub struct EncryptArgs {
     /// Mode of operation.
     #[arg(short, long, value_enum)]
     pub mode: ModeArg,
-    /// Padding scheme for ECB and CBC [default: pkcs7]. Not allowed with CTR.
+    /// Padding scheme for ECB and CBC [default: pkcs7]. Not allowed with CTR or GCM.
     #[arg(short, long, value_enum)]
     pub padding: Option<PaddingArg>,
     /// Size of the read and write buffer, in bytes.
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
-    /// Number of threads for ECB, CBC decryption and CTR. CBC encryption always
-    /// uses one.
+    /// Number of threads for ECB, CBC decryption, CTR and the counter step of GCM.
+    /// CBC encryption and GCM authentication always use one.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
     pub threads: u16,
     /// After encrypting, decrypt the result and compare it with the input.
@@ -97,8 +97,8 @@ pub struct DecryptArgs {
     #[arg(long, default_value_t = DEFAULT_BUFFER_SIZE as u64,
           value_parser = clap::value_parser!(u64).range(1..=MAX_BUFFER_SIZE as u64))]
     pub buffer_size: u64,
-    /// Number of threads for ECB, CBC decryption and CTR. CBC encryption always
-    /// uses one.
+    /// Number of threads for ECB, CBC decryption, CTR and the counter step of GCM.
+    /// CBC encryption and GCM authentication always use one.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=256))]
     pub threads: u16,
     /// Replace the output file if it exists.
@@ -188,6 +188,8 @@ pub enum ModeArg {
     Cbc,
     /// Counter mode, with no padding.
     Ctr,
+    /// Galois/Counter Mode: counter mode with an authentication tag. AES only.
+    Gcm,
 }
 
 impl From<ModeArg> for Mode {
@@ -196,6 +198,7 @@ impl From<ModeArg> for Mode {
             ModeArg::Ecb => Mode::Ecb,
             ModeArg::Cbc => Mode::Cbc,
             ModeArg::Ctr => Mode::Ctr,
+            ModeArg::Gcm => Mode::Gcm,
         }
     }
 }

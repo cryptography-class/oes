@@ -33,6 +33,15 @@ fn assert_success(output: &Output, context: &str) {
 /// Every algorithm the program supports, as named on the command line.
 const ALGORITHMS: [&str; 4] = ["des", "aes128", "aes192", "aes256"];
 
+/// The modes `algorithm` supports: GCM needs AES.
+fn modes_for(algorithm: &str) -> &'static [&'static str] {
+    if algorithm == "des" {
+        &["ecb", "cbc", "ctr"]
+    } else {
+        &["ecb", "cbc", "ctr", "gcm"]
+    }
+}
+
 /// A temporary directory holding a freshly generated key for one algorithm.
 struct Setup {
     dir: TempDir,
@@ -111,7 +120,7 @@ fn round_trip_restores_every_algorithm_mode_and_length() {
     ];
     for algorithm in ALGORITHMS {
         let setup = Setup::new("cli", algorithm);
-        for mode in ["ecb", "cbc", "ctr"] {
+        for &mode in modes_for(algorithm) {
             for (len, buffer) in cases {
                 let context = format!("{algorithm} {mode}, length {len}, buffer {buffer}");
                 let (input, enc, restored) = (
@@ -138,7 +147,7 @@ fn round_trip_works_across_thread_counts() {
     let len = 3 * 8192 + 5;
     for algorithm in ALGORITHMS {
         let setup = Setup::new("cli", algorithm);
-        for mode in ["ecb", "cbc", "ctr"] {
+        for &mode in modes_for(algorithm) {
             for (encrypt_threads, decrypt_threads) in [("4", "1"), ("1", "4")] {
                 let context =
                     format!("{algorithm} {mode}, {encrypt_threads} threads to {decrypt_threads}");
@@ -178,17 +187,15 @@ fn encrypt_draws_a_fresh_iv_each_time() {
 }
 
 #[test]
-fn encrypt_refuses_padding_with_ctr() {
+fn encrypt_refuses_padding_with_ctr_and_gcm_with_des() {
     let setup = Setup::new("cli", "des");
     let input = setup.path("in.bin");
     fs::write(&input, sample(16)).unwrap();
-    let output = setup.encrypt(
-        &input,
-        &setup.path("out.enc"),
-        &["-m", "ctr", "-p", "pkcs7"],
-    );
-    assert!(!output.status.success());
-    assert!(!setup.path("out.enc").exists());
+    for flags in [["-m", "ctr", "-p", "pkcs7"].as_slice(), &["-m", "gcm"]] {
+        let output = setup.encrypt(&input, &setup.path("out.enc"), flags);
+        assert!(!output.status.success(), "{flags:?}");
+        assert!(!setup.path("out.enc").exists(), "{flags:?}");
+    }
 }
 
 #[test]
@@ -223,6 +230,32 @@ fn decrypt_of_a_truncated_container_fails_without_output() {
             setup.dir.entries(),
             ["des.key", "in.bin", "out.enc"],
             "mode {mode}"
+        );
+    }
+}
+
+#[test]
+fn decrypt_of_a_changed_gcm_container_fails_without_output() {
+    let setup = Setup::new("cli", "aes128");
+    let input = setup.path("in.bin");
+    fs::write(&input, sample(100)).unwrap();
+    let (enc, restored) = (setup.path("out.enc"), setup.path("restored.bin"));
+    assert_success(&setup.encrypt(&input, &enc, &["-m", "gcm"]), "encrypt");
+    let original = fs::read(&enc).unwrap();
+
+    // The image type in the header (still a valid code), the nonce, the
+    // ciphertext and the tag.
+    for position in [5, 20, 60, original.len() - 1] {
+        let mut bytes = original.clone();
+        bytes[position] ^= 1;
+        fs::write(&enc, bytes).unwrap();
+
+        let output = setup.decrypt(&enc, &restored, &[]);
+        assert!(!output.status.success(), "byte {position}");
+        assert_eq!(
+            setup.dir.entries(),
+            ["aes128.key", "in.bin", "out.enc"],
+            "byte {position}"
         );
     }
 }

@@ -1,4 +1,5 @@
 use crate::container::errors::ContainerError;
+use crate::modes::gcm::NONCE_LEN;
 use crate::padding::{Fill, Padding};
 
 /// The format of the original file, recorded so the user knows what decryption
@@ -116,21 +117,25 @@ impl Algorithm {
 }
 
 /// The mode of operation. **ECB must not protect real data**: equal plaintext
-/// blocks give equal ciphertext blocks.
+/// blocks give equal ciphertext blocks. GCM is the only mode that authenticates
+/// the data and the header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Ecb,
     Cbc,
     Ctr,
+    Gcm,
 }
 
 impl Mode {
-    /// Returns the length of the IV or initial counter block this mode stores
-    /// in the header: none for ECB, one block for CBC and CTR.
+    /// Returns the length of the IV, initial counter block or nonce this mode
+    /// stores in the header: none for ECB, one block for CBC and CTR, and
+    /// [`NONCE_LEN`] bytes for GCM.
     pub fn iv_len(self, algorithm: Algorithm) -> usize {
         match self {
             Self::Ecb => 0,
             Self::Cbc | Self::Ctr => algorithm.block_size(),
+            Self::Gcm => NONCE_LEN,
         }
     }
 
@@ -139,6 +144,7 @@ impl Mode {
             Self::Ecb => 1,
             Self::Cbc => 2,
             Self::Ctr => 3,
+            Self::Gcm => 4,
         }
     }
 
@@ -147,6 +153,7 @@ impl Mode {
             1 => Ok(Self::Ecb),
             2 => Ok(Self::Cbc),
             3 => Ok(Self::Ctr),
+            4 => Ok(Self::Gcm),
             _ => Err(ContainerError::UnknownCode {
                 field: "mode",
                 value,

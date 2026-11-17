@@ -49,11 +49,12 @@ impl PixelParams {
     ///
     /// # Errors
     ///
-    /// - [`PixelError::Invalid`] for CTR, which pixel encryption doesn't support.
+    /// - [`PixelError::Invalid`] for CTR or GCM, which pixel encryption doesn't
+    ///   support.
     /// - [`PixelError::Container`] if the IV length or padding doesn't fit, as in
     ///   [`Header::validate`].
     pub fn validate(&self) -> Result<(), PixelError> {
-        if self.mode == Mode::Ctr {
+        if !matches!(self.mode, Mode::Ecb | Mode::Cbc) {
             return Err(PixelError::Invalid(
                 "pixel encryption supports ECB and CBC only",
             ));
@@ -188,7 +189,7 @@ impl PixelMeta {
             height: u32::from_be_bytes(height),
             tail_block: Vec::new(),
         };
-        // CTR is refused before the tail length is used.
+        // CTR and GCM are refused before the tail length is used.
         meta.params.validate()?;
         meta.tail_block = vec![0u8; meta.expected_tail_len()];
         read_exact_or_truncated(reader, &mut meta.tail_block)?;
