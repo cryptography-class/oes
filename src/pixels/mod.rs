@@ -4,8 +4,8 @@
 //! An image is decoded to 8-bit RGB (alpha is dropped), its pixel bytes are
 //! encrypted in place with ECB or CBC, and the result is saved as lossless PNG or
 //! BMP. Everything decryption needs except the key goes into a separate metadata
-//! file, whose layout is documented in `meta.rs`. The caller builds the mode with
-//! the key and IV, so this module never handles keys.
+//! file, whose layout is documented in `meta.rs`. The caller passes a cipher
+//! built with the key, so this module never handles key bytes.
 //!
 //! Whole images are loaded into memory; large files belong in [`crate::stream`].
 //!

@@ -4,10 +4,9 @@ use std::time::Instant;
 
 use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::des::DesCipher;
-use oes::ciphers::traits::{BlockCipher, KeyInit};
+use oes::ciphers::traits::KeyInit;
 use oes::container::{Algorithm, Mode};
 use oes::keys::Key;
-use oes::modes::{BlockMode, Cbc, Ecb};
 use oes::padding::Padding;
 use oes::pixels::{
     PixelMeta, PixelParams, count_distinct_blocks, decrypt_image_file, default_meta_path,
@@ -37,15 +36,25 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     };
 
     let started = Instant::now();
-    let mut block_mode = build_block_mode(&params, &key)?;
-    let meta = encrypt_image_file(
-        &args.input,
-        &args.output,
-        &meta_path,
-        args.force,
-        &mut *block_mode,
-        params,
-    )?;
+    let (input, output, force) = (&args.input, &args.output, args.force);
+    let meta = match algorithm {
+        Algorithm::Des => {
+            let cipher = DesCipher::new(key.as_array::<8>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes128 => {
+            let cipher = Aes128Cipher::new(key.as_array::<16>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes192 => {
+            let cipher = Aes192Cipher::new(key.as_array::<24>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes256 => {
+            let cipher = Aes256Cipher::new(key.as_array::<32>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+    }?;
     let elapsed = started.elapsed();
 
     let encrypted = load_rgb(&args.output)?;
@@ -79,14 +88,25 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
     let key = Key::load(meta.params.algorithm, &args.key)?;
 
     let started = Instant::now();
-    let mut block_mode = build_block_mode(&meta.params, &key)?;
-    decrypt_image_file(
-        &args.input,
-        &args.output,
-        &meta,
-        args.force,
-        &mut *block_mode,
-    )?;
+    let (input, output, force) = (&args.input, &args.output, args.force);
+    match meta.params.algorithm {
+        Algorithm::Des => {
+            let cipher = DesCipher::new(key.as_array::<8>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes128 => {
+            let cipher = Aes128Cipher::new(key.as_array::<16>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes192 => {
+            let cipher = Aes192Cipher::new(key.as_array::<24>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes256 => {
+            let cipher = Aes256Cipher::new(key.as_array::<32>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+    }?;
     let elapsed = started.elapsed();
 
     print_table(
@@ -110,26 +130,4 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
         ],
     );
     Ok(())
-}
-
-/// Builds the sequential ECB or CBC mode that `params` names, keyed with `key`.
-fn build_block_mode(params: &PixelParams, key: &Key) -> CliResult<Box<dyn BlockMode>> {
-    match params.algorithm {
-        Algorithm::Des => mode_for(DesCipher::new(key.as_array::<8>()?), params),
-        Algorithm::Aes128 => mode_for(Aes128Cipher::new(key.as_array::<16>()?), params),
-        Algorithm::Aes192 => mode_for(Aes192Cipher::new(key.as_array::<24>()?), params),
-        Algorithm::Aes256 => mode_for(Aes256Cipher::new(key.as_array::<32>()?), params),
-    }
-}
-
-/// Builds the ECB or CBC mode that `params` names around `cipher`.
-fn mode_for<C: BlockCipher + 'static>(
-    cipher: C,
-    params: &PixelParams,
-) -> CliResult<Box<dyn BlockMode>> {
-    match params.mode {
-        Mode::Ecb => Ok(Box::new(Ecb::new(cipher))),
-        Mode::Cbc => Ok(Box::new(Cbc::new(cipher, &params.iv)?)),
-        Mode::Ctr | Mode::Gcm => Err("pixel encryption supports ECB and CBC only".into()),
-    }
 }

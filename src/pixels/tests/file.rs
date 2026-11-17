@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use image::{Rgb, RgbImage};
 
-use super::common::{KEY, WRONG_KEY, des_mode, iv_for};
+use super::common::{KEY, WRONG_KEY, iv_for};
+use crate::ciphers::des::DesCipher;
+use crate::ciphers::traits::KeyInit;
 use crate::container::{Algorithm, Mode};
 use crate::padding::Padding;
 use crate::pixels::{
@@ -42,7 +44,7 @@ fn encrypt(dir: &TempDir, source: &Path, mode: Mode) -> (PathBuf, PixelMeta) {
         &output,
         &default_meta_path(&output),
         false,
-        &mut *des_mode(mode, &KEY),
+        DesCipher::new(&KEY),
         params(mode),
     )
     .unwrap();
@@ -69,7 +71,7 @@ fn encrypt_image_file_round_trips_png_and_bmp_in_ecb_and_cbc() {
                     &encrypted,
                     &meta_path,
                     false,
-                    &mut *des_mode(mode, &KEY),
+                    DesCipher::new(&KEY),
                     params(mode),
                 )
                 .unwrap();
@@ -78,14 +80,8 @@ fn encrypt_image_file_round_trips_png_and_bmp_in_ecb_and_cbc() {
                 assert_ne!(encrypted_image.as_raw(), original.as_raw(), "{context}");
 
                 let meta = PixelMeta::read_file(&meta_path).unwrap();
-                decrypt_image_file(
-                    &encrypted,
-                    &restored,
-                    &meta,
-                    false,
-                    &mut *des_mode(mode, &KEY),
-                )
-                .unwrap();
+                decrypt_image_file(&encrypted, &restored, &meta, false, DesCipher::new(&KEY))
+                    .unwrap();
                 assert_eq!(
                     load_rgb(&restored).unwrap().as_raw(),
                     original.as_raw(),
@@ -110,7 +106,7 @@ fn encrypt_image_file_keeps_existing_outputs_unless_overwrite_is_set() {
             &output,
             &meta_path,
             overwrite,
-            &mut *des_mode(Mode::Ecb, &KEY),
+            DesCipher::new(&KEY),
             params(Mode::Ecb),
         )
     };
@@ -152,7 +148,7 @@ fn encrypt_image_file_rejects_invalid_requests_before_any_output() {
             output,
             meta_path,
             false,
-            &mut *des_mode(Mode::Ecb, &KEY),
+            DesCipher::new(&KEY),
             params(Mode::Ecb),
         );
         assert!(
@@ -175,7 +171,7 @@ fn decrypt_image_file_with_a_wrong_key_fails_without_output() {
         &restored,
         &meta,
         false,
-        &mut *des_mode(Mode::Cbc, &WRONG_KEY),
+        DesCipher::new(&WRONG_KEY),
     );
     assert!(
         matches!(
@@ -196,13 +192,7 @@ fn decrypt_image_file_rejects_an_image_of_another_size() {
     picture(6, 3).save(&other).unwrap();
 
     let restored = dir.path().join("dec.png");
-    let result = decrypt_image_file(
-        &other,
-        &restored,
-        &meta,
-        false,
-        &mut *des_mode(Mode::Ecb, &KEY),
-    );
+    let result = decrypt_image_file(&other, &restored, &meta, false, DesCipher::new(&KEY));
     assert!(matches!(
         result,
         Err(PixelError::DimensionMismatch {

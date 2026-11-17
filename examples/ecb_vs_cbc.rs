@@ -13,7 +13,6 @@ use oes::ciphers::des::DesCipher;
 use oes::ciphers::traits::KeyInit;
 use oes::container::{Algorithm, Mode};
 use oes::keys::Key;
-use oes::modes::{BlockMode, Cbc, Ecb};
 use oes::padding::Padding;
 use oes::pixels::{
     PixelParams, count_distinct_blocks, default_meta_path, encrypt_image_file, load_rgb,
@@ -67,19 +66,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             padding: Padding::Pkcs7,
             iv: random_bytes(mode.iv_len(Algorithm::Des))?,
         };
-        let cipher = DesCipher::new(key.as_array::<8>()?);
-        let mut block_mode: Box<dyn BlockMode> = match mode {
-            Mode::Cbc => Box::new(Cbc::new(cipher, &params.iv)?),
-            _ => Box::new(Ecb::new(cipher)),
-        };
-
         let output = out_dir.join(format!("original_{name}.png"));
         encrypt_image_file(
             &source,
             &output,
             &default_meta_path(&output),
             true,
-            &mut *block_mode,
+            DesCipher::new(key.as_array::<8>()?),
             params,
         )?;
 
