@@ -17,6 +17,9 @@ pub enum KeyError {
     },
     /// A DES key byte has even parity. `byte` is its zero-based position.
     BadParity { byte: usize },
+    /// The DES key is one of the weak or semi-weak keys in
+    /// [`weak_keys`](crate::ciphers::des::weak_keys).
+    WeakKey,
 }
 
 impl fmt::Display for KeyError {
@@ -35,6 +38,7 @@ impl fmt::Display for KeyError {
                 f,
                 "invalid DES key: byte {byte} fails the odd parity check (wrong or corrupted key)"
             ),
+            Self::WeakKey => write!(f, "invalid DES key: weak or semi-weak keys are refused"),
         }
     }
 }

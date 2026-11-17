@@ -5,6 +5,7 @@ use std::path::Path;
 
 use super::errors::KeyError;
 use crate::ciphers::des::parity::{first_bad_parity_byte, set_parity};
+use crate::ciphers::des::weak_keys::is_weak;
 use crate::container::Algorithm;
 use crate::random::random_bytes;
 use crate::secret::wipe;
@@ -13,7 +14,8 @@ use crate::stream::AtomicFile;
 /// A validated key for one algorithm, erased from memory when dropped.
 ///
 /// Every way of getting a `Key` checks the length and, for DES, the parity of
-/// each byte. It has no `Clone`, and `Debug` doesn't show the bytes.
+/// each byte and that the key isn't weak or semi-weak. It has no `Clone`, and
+/// `Debug` doesn't show the bytes.
 pub struct Key {
     algorithm: Algorithm,
     bytes: Vec<u8>,
@@ -21,21 +23,29 @@ pub struct Key {
 
 impl Key {
     /// Generates a key with the operating system's secure random generator.
-    /// DES keys get valid parity bits; AES keys have none.
+    /// DES keys get valid parity bits, and a weak or semi-weak DES key is drawn
+    /// again (a chance of about 1 in 2^52). AES keys have no parity bits.
     ///
     /// # Errors
     ///
     /// [`KeyError::Io`] if the random generator is unavailable.
     pub fn generate(algorithm: Algorithm) -> Result<Self, KeyError> {
-        let mut key = Key {
-            algorithm,
-            bytes: random_bytes(algorithm.key_len())?,
-        };
-        match algorithm {
-            Algorithm::Des => set_parity(key.as_array_mut::<8>()?),
-            Algorithm::Aes128 | Algorithm::Aes192 | Algorithm::Aes256 => {}
+        loop {
+            let mut key = Key {
+                algorithm,
+                bytes: random_bytes(algorithm.key_len())?,
+            };
+            match algorithm {
+                Algorithm::Des => {
+                    set_parity(key.as_array_mut::<8>()?);
+                    if is_weak(key.as_array::<8>()?) {
+                        continue; // Draw again; dropping `key` erases it.
+                    }
+                }
+                Algorithm::Aes128 | Algorithm::Aes192 | Algorithm::Aes256 => {}
+            }
+            return Ok(key);
         }
-        Ok(key)
     }
 
     /// Loads a key from a file holding exactly the raw key bytes.
@@ -45,6 +55,8 @@ impl Key {
     /// - [`KeyError::Io`] if the file can't be read; the message names the file.
     /// - [`KeyError::InvalidLength`] if the file size is wrong for `algorithm`.
     /// - [`KeyError::BadParity`] if a DES key byte has even parity.
+    /// - [`KeyError::WeakKey`] if a DES key is weak or semi-weak. Parity is
+    ///   checked first.
     pub fn load(algorithm: Algorithm, path: &Path) -> Result<Self, KeyError> {
         let with_path = |e: io::Error| io::Error::new(e.kind(), format!("{}: {e}", path.display()));
         let mut file = File::open(path).map_err(with_path)?;
@@ -66,7 +78,7 @@ impl Key {
             bytes: vec![0u8; expected],
         };
         file.read_exact(&mut key.bytes).map_err(with_path)?;
-        key.check_parity()?;
+        key.validate()?;
         Ok(key)
     }
 
@@ -115,12 +127,19 @@ impl Key {
         }
     }
 
-    fn check_parity(&self) -> Result<(), KeyError> {
+    /// Checks a DES key's parity, then that it isn't weak. AES keys always pass.
+    fn validate(&self) -> Result<(), KeyError> {
         match self.algorithm {
-            Algorithm::Des => match first_bad_parity_byte(self.as_array::<8>()?) {
-                Some(byte) => Err(KeyError::BadParity { byte }),
-                None => Ok(()),
-            },
+            Algorithm::Des => {
+                let bytes = self.as_array::<8>()?;
+                if let Some(byte) = first_bad_parity_byte(bytes) {
+                    return Err(KeyError::BadParity { byte });
+                }
+                if is_weak(bytes) {
+                    return Err(KeyError::WeakKey);
+                }
+                Ok(())
+            }
             Algorithm::Aes128 | Algorithm::Aes192 | Algorithm::Aes256 => Ok(()),
         }
     }
