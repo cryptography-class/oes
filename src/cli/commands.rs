@@ -9,11 +9,14 @@ use oes::ciphers::des::DesCipher;
 use oes::ciphers::traits::{BlockCipher, KeyInit};
 use oes::container::{Algorithm, Header, ImageType, Mode};
 use oes::keys::Key;
-use oes::modes::{BlockMode, Cbc, Ctr, Ecb};
+use oes::modes::{BlockMode, Cbc, Ctr, Ecb, GcmDecryptor, GcmEncryptor};
 use oes::padding::{Fill, Padding};
 use oes::random::random_bytes;
 use oes::secret::wipe;
-use oes::stream::{AtomicFile, ByteCounts, apply_ctr_stream, decrypt_stream, encrypt_stream};
+use oes::stream::{
+    AtomicFile, ByteCounts, apply_ctr_stream, decrypt_gcm_stream, decrypt_stream,
+    encrypt_gcm_stream, encrypt_stream,
+};
 
 use super::args::{Cli, Command, DecryptArgs, EncryptArgs, KeygenArgs};
 use super::memory::peak_heap_bytes;
@@ -54,8 +57,10 @@ fn encrypt(args: &EncryptArgs) -> CliResult<()> {
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
     let padding = match (mode, args.padding) {
-        (Mode::Ctr, Some(_)) => return Err("CTR mode takes no padding, so leave out -p".into()),
-        (Mode::Ctr, None) => None,
+        (Mode::Ctr | Mode::Gcm, Some(_)) => {
+            return Err("CTR and GCM take no padding, so leave out -p".into());
+        }
+        (Mode::Ctr | Mode::Gcm, None) => None,
         (_, padding) => Some(padding.map_or(Padding::Pkcs7, Padding::from)),
     };
     let buffer_size = args.buffer_size as usize;
@@ -286,6 +291,40 @@ fn run_mode<C: BlockCipher, R: Read, W: Write>(
             writer,
             buffer_size,
         )?,
+        Mode::Gcm => run_gcm(
+            cipher,
+            header,
+            direction,
+            reader,
+            writer,
+            buffer_size,
+            parallel,
+        )?,
+    };
+    Ok(counts)
+}
+
+/// Streams the data through GCM, with the header bytes as the AAD, so a changed
+/// header fails authentication. Decryption checks the tag before it returns.
+fn run_gcm<C: BlockCipher, R: Read, W: Write>(
+    cipher: C,
+    header: &Header,
+    direction: Direction,
+    reader: &mut R,
+    writer: &mut W,
+    buffer_size: usize,
+    parallel: bool,
+) -> CliResult<ByteCounts> {
+    let aad = header.to_bytes()?;
+    let counts = match direction {
+        Direction::Encrypt => {
+            let encryptor = GcmEncryptor::new(cipher, &header.iv, &aad)?.parallel(parallel);
+            encrypt_gcm_stream(encryptor, reader, writer, buffer_size)?
+        }
+        Direction::Decrypt => {
+            let decryptor = GcmDecryptor::new(cipher, &header.iv, &aad)?.parallel(parallel);
+            decrypt_gcm_stream(decryptor, reader, writer, buffer_size)?
+        }
     };
     Ok(counts)
 }
@@ -460,6 +499,7 @@ pub(super) fn cipher_name(algorithm: Algorithm, mode: Mode, padding: Option<Padd
         Mode::Ecb => "ECB",
         Mode::Cbc => "CBC",
         Mode::Ctr => "CTR",
+        Mode::Gcm => "GCM",
     };
     let padding = match padding {
         None => "no padding",

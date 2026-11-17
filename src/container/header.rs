@@ -6,22 +6,28 @@
 //! 4       1     format version (1)
 //! 5       1     original image type   (0 unknown, 1 BMP, 2 PNG, 3 JPEG)
 //! 6       1     algorithm             (1 DES, 2 AES-128, 3 AES-192, 4 AES-256)
-//! 7       1     mode                  (1 ECB, 2 CBC, 3 CTR)
+//! 7       1     mode                  (1 ECB, 2 CBC, 3 CTR, 4 GCM)
 //! 8       1     padding               (0 none, 1 PKCS#7, 2 PKCS#5,
 //!                                      3 ANSI X9.23 zeros, 4 ANSI X9.23 random)
 //! 9       8     original length in bytes, u64 big-endian
-//! 17      n     IV or initial counter block: n = 0 for ECB, one block for CBC and CTR
+//! 17      n     IV, initial counter block or nonce: n = 0 for ECB, one block
+//!               for CBC and CTR, 12 bytes for GCM
 //! 17+n    ...   ciphertext
+//! end-16  16    GCM only: authentication tag
 //! ```
 //!
 //! The IV length isn't stored, because the algorithm and mode determine it.
-//! A code for GCM (mode 4, followed by a 16-byte tag at the end of the file)
-//! will be added without moving any field.
+//! For GCM the header bytes are the AAD, so a header changed while it still
+//! names GCM fails authentication. The mode byte itself decides whether a tag
+//! is checked: a GCM container rewritten as CTR, with the nonce followed by the
+//! counter value 2 as its IV, decrypts with no check at all. Authentication
+//! therefore holds only for a container already known to be GCM.
 
 use std::io::{ErrorKind, Read, Write};
 
 use super::errors::ContainerError;
 use super::fields::{Algorithm, ImageType, Mode, padding_from_byte, padding_to_byte};
+use crate::modes::gcm::MAX_PLAINTEXT_LEN;
 use crate::padding::Padding;
 
 const MAGIC: [u8; 4] = *b"OESC";
@@ -35,9 +41,10 @@ pub struct Header {
     pub image_type: ImageType,
     pub algorithm: Algorithm,
     pub mode: Mode,
-    /// `None` exactly when the mode needs no padding (CTR).
+    /// `None` exactly when the mode needs no padding (CTR and GCM).
     pub padding: Option<Padding>,
-    /// The IV for CBC or the initial counter block for CTR; empty for ECB.
+    /// The IV for CBC, the initial counter block for CTR or the nonce for GCM;
+    /// empty for ECB.
     pub iv: Vec<u8>,
     /// The plaintext length, which the decrypted output must match.
     pub original_len: u64,
@@ -50,12 +57,13 @@ impl Header {
     /// # Errors
     ///
     /// [`ContainerError::InvalidCombination`] if ECB or CBC has no padding, CTR
-    /// has padding, the padding doesn't allow the cipher's block size (PKCS#5
-    /// needs 8-byte blocks), or the IV length isn't [`Mode::iv_len`].
+    /// or GCM has padding, the padding doesn't allow the cipher's block size
+    /// (PKCS#5 needs 8-byte blocks), GCM has a cipher other than AES or a length
+    /// over [`MAX_PLAINTEXT_LEN`], or the IV length isn't [`Mode::iv_len`].
     pub fn validate(&self) -> Result<(), ContainerError> {
         let needs_padding = match self.mode {
             Mode::Ecb | Mode::Cbc => true,
-            Mode::Ctr => false,
+            Mode::Ctr | Mode::Gcm => false,
         };
         if needs_padding && self.padding.is_none() {
             return Err(ContainerError::InvalidCombination(
@@ -63,7 +71,19 @@ impl Header {
             ));
         }
         if !needs_padding && self.padding.is_some() {
-            return Err(ContainerError::InvalidCombination("CTR takes no padding"));
+            return Err(ContainerError::InvalidCombination(
+                "CTR and GCM take no padding",
+            ));
+        }
+        if self.mode == Mode::Gcm {
+            if self.algorithm == Algorithm::Des {
+                return Err(ContainerError::InvalidCombination("GCM needs AES"));
+            }
+            if self.original_len > MAX_PLAINTEXT_LEN {
+                return Err(ContainerError::InvalidCombination(
+                    "the data is too long for one GCM message",
+                ));
+            }
         }
         if let Some(padding) = self.padding {
             if padding
@@ -77,10 +97,30 @@ impl Header {
         }
         if self.iv.len() != self.mode.iv_len(self.algorithm) {
             return Err(ContainerError::InvalidCombination(
-                "the IV must be one block for CBC and CTR and empty for ECB",
+                "the IV must be one block for CBC and CTR, 12 bytes for GCM and empty for ECB",
             ));
         }
         Ok(())
+    }
+
+    /// Validates the header and returns its bytes, as
+    /// [`write_to`](Self::write_to) writes them. For GCM they are the AAD.
+    ///
+    /// # Errors
+    ///
+    /// [`ContainerError::InvalidCombination`] as in [`validate`](Self::validate).
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ContainerError> {
+        self.validate()?;
+        let mut bytes = Vec::with_capacity(FIXED_LEN + self.iv.len());
+        bytes.extend_from_slice(&MAGIC);
+        bytes.push(VERSION);
+        bytes.push(self.image_type.to_byte());
+        bytes.push(self.algorithm.to_byte());
+        bytes.push(self.mode.to_byte());
+        bytes.push(padding_to_byte(self.padding));
+        bytes.extend_from_slice(&self.original_len.to_be_bytes());
+        bytes.extend_from_slice(&self.iv);
+        Ok(bytes)
     }
 
     /// Validates the header and writes it. Nothing is written if validation fails.
@@ -90,17 +130,7 @@ impl Header {
     /// [`ContainerError::InvalidCombination`] as in [`validate`](Self::validate),
     /// or [`ContainerError::Io`] if writing fails.
     pub fn write_to<W: Write + ?Sized>(&self, writer: &mut W) -> Result<(), ContainerError> {
-        self.validate()?;
-        let mut fixed = [0u8; FIXED_LEN];
-        fixed[..4].copy_from_slice(&MAGIC);
-        fixed[4] = VERSION;
-        fixed[5] = self.image_type.to_byte();
-        fixed[6] = self.algorithm.to_byte();
-        fixed[7] = self.mode.to_byte();
-        fixed[8] = padding_to_byte(self.padding);
-        fixed[9..].copy_from_slice(&self.original_len.to_be_bytes());
-        writer.write_all(&fixed)?;
-        writer.write_all(&self.iv)?;
+        writer.write_all(&self.to_bytes()?)?;
         Ok(())
     }
 

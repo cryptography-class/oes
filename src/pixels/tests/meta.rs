@@ -28,10 +28,15 @@ fn to_bytes(meta: &PixelMeta) -> Result<Vec<u8>, PixelError> {
 // ---- PixelParams::validate ----
 
 #[test]
-fn validate_rejects_ctr_and_a_wrong_iv_length() {
-    let mut params = des_cbc().params;
-    params.mode = Mode::Ctr;
-    assert!(matches!(params.validate(), Err(PixelError::Invalid(_))));
+fn validate_rejects_ctr_gcm_and_a_wrong_iv_length() {
+    for mode in [Mode::Ctr, Mode::Gcm] {
+        let mut params = des_cbc().params;
+        params.mode = mode;
+        assert!(
+            matches!(params.validate(), Err(PixelError::Invalid(_))),
+            "{mode:?}"
+        );
+    }
 
     let mut params = des_cbc().params;
     params.iv = vec![0; 16];

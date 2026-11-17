@@ -4,6 +4,11 @@ use super::errors::ContainerError;
 use super::{Algorithm, Header, ImageType, Mode};
 use crate::padding::{Fill, Padding};
 
+/// The GCM length limit, copied from NIST SP 800-38D section 5.2.1.1: 2^39 - 256
+/// bits.
+const GCM_MAX_LEN: u64 = (1 << 36) - 32;
+const NONCE: [u8; 12] = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2];
+
 const IV: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const PADDINGS: [Padding; 4] = [
     Padding::Pkcs7,
@@ -30,6 +35,17 @@ fn ecb_header() -> Header {
         mode: Mode::Ecb,
         padding: Some(Padding::AnsiX923(Fill::Random)),
         iv: Vec::new(),
+        original_len: 13,
+    }
+}
+
+fn gcm_header() -> Header {
+    Header {
+        image_type: ImageType::Unknown,
+        algorithm: Algorithm::Aes256,
+        mode: Mode::Gcm,
+        padding: None,
+        iv: NONCE.to_vec(),
         original_len: 13,
     }
 }
@@ -67,6 +83,18 @@ fn write_to_matches_documented_layout() {
         0, 0, 0, 0, 0, 0, 0, 13,
     ];
     assert_eq!(to_bytes(&ecb_header()), ecb);
+
+    #[rustfmt::skip]
+    let gcm = [
+        b'O', b'E', b'S', b'C', 1,
+        0,                      // unknown
+        4,                      // AES-256
+        4,                      // GCM
+        0,                      // no padding
+        0, 0, 0, 0, 0, 0, 0, 13,
+        9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, // nonce
+    ];
+    assert_eq!(to_bytes(&gcm_header()), gcm);
 }
 
 #[test]
@@ -103,6 +131,26 @@ fn write_to_refuses_invalid_combinations() {
                 h.iv.truncate(7);
             }),
         ),
+        ("GCM with padding", {
+            let mut h = gcm_header();
+            h.padding = Some(Padding::Pkcs7);
+            h
+        }),
+        ("GCM with DES", {
+            let mut h = gcm_header();
+            h.algorithm = Algorithm::Des;
+            h
+        }),
+        ("GCM with a one-block IV", {
+            let mut h = gcm_header();
+            h.iv = vec![0; 16];
+            h
+        }),
+        ("GCM over the length limit", {
+            let mut h = gcm_header();
+            h.original_len = GCM_MAX_LEN + 1;
+            h
+        }),
     ];
     for (name, header) in cases {
         let mut out = Vec::new();
@@ -152,6 +200,12 @@ fn read_from_round_trips_every_valid_combination() {
             assert_eq!(rest, b"ciphertext", "{image_type:?} {mode:?} {padding:?}");
         }
     }
+
+    // GCM needs AES, and the largest length it allows is valid.
+    let mut header = gcm_header();
+    header.original_len = GCM_MAX_LEN;
+    let read = Header::read_from(&mut Cursor::new(to_bytes(&header))).unwrap();
+    assert_eq!(read, header);
 }
 
 #[test]
@@ -187,7 +241,7 @@ fn read_from_rejects_unknown_codes() {
         (6, "algorithm", 0),
         (6, "algorithm", 5),
         (7, "mode", 0),
-        (7, "mode", 4),
+        (7, "mode", 5),
         (8, "padding", 5),
     ];
     for (pos, field, value) in cases {

@@ -3,8 +3,11 @@
 //!
 //! The header records the original image type, algorithm, mode, padding, IV and
 //! original length. Its byte layout is documented in `header.rs`. The key is
-//! never stored. The header isn't authenticated, so a changed header is caught
-//! only when it gives invalid codes or makes decryption fail.
+//! never stored. With GCM the header is authenticated along with the data. With
+//! the other modes it isn't, so a changed header is caught only when it gives
+//! invalid codes or makes decryption fail. The mode byte decides which case
+//! applies, so a GCM container rewritten to another mode is no longer
+//! authenticated.
 //!
 //! **DES and ECB must not protect real data.**
 

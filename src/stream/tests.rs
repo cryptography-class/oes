@@ -12,6 +12,8 @@ use crate::modes::{BlockMode, Cbc, Ctr, Ecb};
 use crate::padding::errors::PaddingError;
 use crate::padding::{Fill, Padding};
 
+mod gcm;
+
 // Tables B1 (ECB) and C1 (CBC) of FIPS 81, DES Modes of Operation.
 const KEY: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
 const IV: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF];

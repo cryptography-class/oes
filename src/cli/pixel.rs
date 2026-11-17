@@ -21,7 +21,7 @@ use super::commands::{CliResult, cipher_name, file_with_size, print_table, secon
 pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
-    if mode == Mode::Ctr {
+    if !matches!(mode, Mode::Ecb | Mode::Cbc) {
         return Err("pixel encryption supports ECB and CBC only".into());
     }
     let meta_path = args
@@ -130,6 +130,6 @@ fn mode_for<C: BlockCipher + 'static>(
     match params.mode {
         Mode::Ecb => Ok(Box::new(Ecb::new(cipher))),
         Mode::Cbc => Ok(Box::new(Cbc::new(cipher, &params.iv)?)),
-        Mode::Ctr => Err("pixel encryption supports ECB and CBC only".into()),
+        Mode::Ctr | Mode::Gcm => Err("pixel encryption supports ECB and CBC only".into()),
     }
 }

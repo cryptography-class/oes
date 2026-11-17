@@ -42,7 +42,8 @@ pub struct Ctr<C: BlockCipher> {
     counter: [u8; MAX_BLOCK_LEN],
     /// Whether the last chunk ended in a partial block, which ends the message.
     ended: bool,
-    parallel: bool,
+    /// Set through [`parallel`](Self::parallel), and directly by GCM.
+    pub(super) parallel: bool,
 }
 
 impl<C: BlockCipher> Ctr<C> {

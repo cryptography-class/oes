@@ -20,9 +20,10 @@ rayon = "1.12"
 
 # Used only by benchmarks and the library comparison tests, never by the
 # implementation: RustCrypto is the reference implementation that DES, AES, ECB,
-# CBC and CTR are checked and timed against.
+# CBC, CTR and GCM are checked and timed against.
 [dev-dependencies]
 aes = "0.9"
+aes-gcm = "0.11"
 cbc = "0.2"
 criterion = "0.8"
 ctr = "0.10"
