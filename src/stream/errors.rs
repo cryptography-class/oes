@@ -15,6 +15,8 @@ pub enum StreamError {
     Padding(PaddingError),
     /// The ciphertext is empty or not a multiple of the block size.
     InvalidCiphertextLength { len: u64, block_size: usize },
+    /// The GCM input is too short to hold the tag.
+    MissingTag { len: u64 },
 }
 
 impl fmt::Display for StreamError {
@@ -30,6 +32,10 @@ impl fmt::Display for StreamError {
             Self::InvalidCiphertextLength { len, block_size } => write!(
                 f,
                 "ciphertext length {len} is not a positive multiple of the {block_size}-byte block size (truncated or corrupted data)"
+            ),
+            Self::MissingTag { len } => write!(
+                f,
+                "the input of {len} bytes is too short to hold the authentication tag (truncated data)"
             ),
         }
     }
