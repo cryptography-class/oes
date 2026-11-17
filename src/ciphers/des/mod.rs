@@ -15,6 +15,7 @@
 //!   built at compile time.
 //! - `tables` holds the permutations and S-boxes from the specification.
 //! - [`parity`] checks and sets the key's parity bits.
+//! - [`weak_keys`] lists the weak and semi-weak keys.
 //!
 //! [`DesCipher`] is the entry point.
 
@@ -25,6 +26,7 @@ mod round;
 mod sp_tables;
 mod tables;
 pub mod parity;
+pub mod weak_keys;
 
 pub use cipher::DesCipher;
 
