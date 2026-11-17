@@ -21,8 +21,8 @@ pub enum PixelError {
     UnsupportedVersion(u8),
     /// The metadata file ends too early.
     Truncated,
-    /// The request or the metadata is invalid, for example CTR mode or an
-    /// unsupported output extension.
+    /// The request or the metadata is invalid, for example an unsupported output
+    /// extension.
     Invalid(&'static str),
     /// The image doesn't have the dimensions recorded in the metadata.
     DimensionMismatch {
@@ -55,6 +55,10 @@ impl fmt::Display for PixelError {
             Self::TailMismatch => write!(
                 f,
                 "the encrypted image and its metadata don't belong together, or the image was modified"
+            ),
+            Self::Mode(ModeError::AuthenticationFailed) => write!(
+                f,
+                "authentication failed: wrong key, or the image or its metadata was changed"
             ),
             Self::Mode(e) => write!(f, "mode error: {e}"),
             Self::Padding(PaddingError::Invalid) => write!(

@@ -4,11 +4,9 @@ use std::time::Instant;
 
 use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::des::DesCipher;
-use oes::ciphers::traits::{BlockCipher, KeyInit};
+use oes::ciphers::traits::KeyInit;
 use oes::container::{Algorithm, Mode};
 use oes::keys::Key;
-use oes::modes::{BlockMode, Cbc, Ecb};
-use oes::padding::Padding;
 use oes::pixels::{
     PixelMeta, PixelParams, count_distinct_blocks, decrypt_image_file, default_meta_path,
     encrypt_image_file, load_rgb,
@@ -16,14 +14,12 @@ use oes::pixels::{
 use oes::random::random_bytes;
 
 use super::args::{PixelDecryptArgs, PixelEncryptArgs};
-use super::commands::{CliResult, cipher_name, file_with_size, print_table, seconds};
+use super::commands::{CliResult, cipher_name, file_with_size, padding_for, print_table, seconds};
 
 pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     let algorithm = Algorithm::from(args.algorithm);
     let mode = Mode::from(args.mode);
-    if !matches!(mode, Mode::Ecb | Mode::Cbc) {
-        return Err("pixel encryption supports ECB and CBC only".into());
-    }
+    let padding = padding_for(mode, args.padding)?;
     let meta_path = args
         .meta
         .clone()
@@ -32,20 +28,30 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
     let params = PixelParams {
         algorithm,
         mode,
-        padding: Padding::from(args.padding),
+        padding,
         iv: random_bytes(mode.iv_len(algorithm))?,
     };
 
     let started = Instant::now();
-    let mut block_mode = build_block_mode(&params, &key)?;
-    let meta = encrypt_image_file(
-        &args.input,
-        &args.output,
-        &meta_path,
-        args.force,
-        &mut *block_mode,
-        params,
-    )?;
+    let (input, output, force) = (&args.input, &args.output, args.force);
+    let meta = match algorithm {
+        Algorithm::Des => {
+            let cipher = DesCipher::new(key.as_array::<8>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes128 => {
+            let cipher = Aes128Cipher::new(key.as_array::<16>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes192 => {
+            let cipher = Aes192Cipher::new(key.as_array::<24>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+        Algorithm::Aes256 => {
+            let cipher = Aes256Cipher::new(key.as_array::<32>()?);
+            encrypt_image_file(input, output, &meta_path, force, cipher, params)
+        }
+    }?;
     let elapsed = started.elapsed();
 
     let encrypted = load_rgb(&args.output)?;
@@ -59,10 +65,7 @@ pub(super) fn pixel_encrypt(args: &PixelEncryptArgs) -> CliResult<()> {
             ),
             ("Output", file_with_size(&args.output)?),
             ("Metadata", file_with_size(&meta_path)?),
-            (
-                "Cipher",
-                cipher_name(algorithm, mode, Some(meta.params.padding)),
-            ),
+            ("Cipher", cipher_name(algorithm, mode, meta.params.padding)),
             ("Blocks", format!("{distinct} distinct of {total}")),
             ("Time", seconds(elapsed)),
         ],
@@ -79,14 +82,25 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
     let key = Key::load(meta.params.algorithm, &args.key)?;
 
     let started = Instant::now();
-    let mut block_mode = build_block_mode(&meta.params, &key)?;
-    decrypt_image_file(
-        &args.input,
-        &args.output,
-        &meta,
-        args.force,
-        &mut *block_mode,
-    )?;
+    let (input, output, force) = (&args.input, &args.output, args.force);
+    match meta.params.algorithm {
+        Algorithm::Des => {
+            let cipher = DesCipher::new(key.as_array::<8>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes128 => {
+            let cipher = Aes128Cipher::new(key.as_array::<16>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes192 => {
+            let cipher = Aes192Cipher::new(key.as_array::<24>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+        Algorithm::Aes256 => {
+            let cipher = Aes256Cipher::new(key.as_array::<32>()?);
+            decrypt_image_file(input, output, &meta, force, cipher)
+        }
+    }?;
     let elapsed = started.elapsed();
 
     print_table(
@@ -100,36 +114,10 @@ pub(super) fn pixel_decrypt(args: &PixelDecryptArgs) -> CliResult<()> {
             ("Metadata", meta_path.display().to_string()),
             (
                 "Cipher",
-                cipher_name(
-                    meta.params.algorithm,
-                    meta.params.mode,
-                    Some(meta.params.padding),
-                ),
+                cipher_name(meta.params.algorithm, meta.params.mode, meta.params.padding),
             ),
             ("Time", seconds(elapsed)),
         ],
     );
     Ok(())
-}
-
-/// Builds the sequential ECB or CBC mode that `params` names, keyed with `key`.
-fn build_block_mode(params: &PixelParams, key: &Key) -> CliResult<Box<dyn BlockMode>> {
-    match params.algorithm {
-        Algorithm::Des => mode_for(DesCipher::new(key.as_array::<8>()?), params),
-        Algorithm::Aes128 => mode_for(Aes128Cipher::new(key.as_array::<16>()?), params),
-        Algorithm::Aes192 => mode_for(Aes192Cipher::new(key.as_array::<24>()?), params),
-        Algorithm::Aes256 => mode_for(Aes256Cipher::new(key.as_array::<32>()?), params),
-    }
-}
-
-/// Builds the ECB or CBC mode that `params` names around `cipher`.
-fn mode_for<C: BlockCipher + 'static>(
-    cipher: C,
-    params: &PixelParams,
-) -> CliResult<Box<dyn BlockMode>> {
-    match params.mode {
-        Mode::Ecb => Ok(Box::new(Ecb::new(cipher))),
-        Mode::Cbc => Ok(Box::new(Cbc::new(cipher, &params.iv)?)),
-        Mode::Ctr | Mode::Gcm => Err("pixel encryption supports ECB and CBC only".into()),
-    }
 }
