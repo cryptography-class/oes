@@ -4,6 +4,7 @@ use super::Key;
 use super::errors::KeyError;
 use crate::ciphers::des::DesCipher;
 use crate::ciphers::des::parity::check_parity;
+use crate::ciphers::des::weak_keys::is_weak;
 use crate::ciphers::traits::{BlockCipher, KeyInit};
 use crate::container::Algorithm;
 use crate::stream::test_util::TempDir;
@@ -14,11 +15,12 @@ const DES_KEY: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 // ---- generate ----
 
 #[test]
-fn generate_gives_valid_parity_and_different_keys() {
+fn generate_gives_valid_non_weak_and_different_keys() {
     let first = Key::generate(Algorithm::Des).unwrap();
     for _ in 0..100 {
         let key = Key::generate(Algorithm::Des).unwrap();
         assert!(check_parity(key.as_array::<8>().unwrap()));
+        assert!(!is_weak(key.as_array::<8>().unwrap()));
         assert_ne!(key.as_array::<8>().unwrap(), first.as_array::<8>().unwrap());
     }
 }
@@ -63,6 +65,25 @@ fn load_refuses_bad_parity_at_each_byte() {
         assert!(
             matches!(res, Err(KeyError::BadParity { byte: b }) if b == byte),
             "byte {byte}: {res:?}"
+        );
+    }
+}
+
+#[test]
+fn load_refuses_weak_and_semi_weak_keys() {
+    // NIST SP 800-67 Rev. 2 section 3.3.2: the first weak key and the first
+    // semi-weak key.
+    let weak = [0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01];
+    let semi_weak = [0x01, 0x1F, 0x01, 0x1F, 0x01, 0x0E, 0x01, 0x0E];
+
+    let dir = TempDir::new("keys");
+    let path = dir.path().join("weak.key");
+    for bytes in [weak, semi_weak] {
+        fs::write(&path, bytes).unwrap();
+        let res = Key::load(Algorithm::Des, &path);
+        assert!(
+            matches!(res, Err(KeyError::WeakKey)),
+            "key {bytes:02X?}: {res:?}"
         );
     }
 }

@@ -7,6 +7,7 @@ use super::tables::{
     E_BOX_EXPANSION, FINAL_PERM, INITIAL_PERM, P_BOX_PERM, PC_1, PC_2, SBOX_1, SBOX_2, SBOX_3,
     SBOX_4, SBOX_5, SBOX_6, SBOX_7, SBOX_8,
 };
+use super::weak_keys::{SEMI_WEAK_KEYS, WEAK_KEYS, is_weak};
 use crate::bits::permute;
 use crate::ciphers::traits::{BlockCipher, KeyInit};
 
@@ -276,6 +277,74 @@ fn sp_tables_match_each_s_box_followed_by_p() {
             let placed = s_box[row][col] << (28 - 4 * i);
             let expected = permute(placed, &P_BOX_PERM, 32) as u32;
             assert_eq!(entry, expected, "S{}, input {x:06b}", i + 1);
+        }
+    }
+}
+
+// ---- weak_keys ----
+
+// Grabbe's plaintext, plus all zeros and all ones.
+const WEAK_KEY_PLAINTEXTS: [u64; 3] = [0x0123_4567_89AB_CDEF, 0, u64::MAX];
+
+#[test]
+fn weak_keys_encrypt_twice_to_the_plaintext() {
+    for key in WEAK_KEYS {
+        let cipher = DesCipher::new(&key);
+        for plaintext in WEAK_KEY_PLAINTEXTS {
+            let mut block = plaintext;
+            cipher.encrypt_block(&mut block);
+            cipher.encrypt_block(&mut block);
+            assert_eq!(
+                block, plaintext,
+                "key {key:02X?}, plaintext {plaintext:016X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn semi_weak_keys_pairs_undo_each_other() {
+    for pair in SEMI_WEAK_KEYS.chunks_exact(2) {
+        let (first, second) = (DesCipher::new(&pair[0]), DesCipher::new(&pair[1]));
+        for plaintext in WEAK_KEY_PLAINTEXTS {
+            let mut block = plaintext;
+            first.encrypt_block(&mut block);
+            assert_ne!(
+                block, plaintext,
+                "pair {pair:02X?}, plaintext {plaintext:016X}"
+            );
+            second.encrypt_block(&mut block);
+            assert_eq!(
+                block, plaintext,
+                "pair {pair:02X?}, plaintext {plaintext:016X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn is_weak_refuses_every_listed_key_with_any_parity_bits() {
+    for key in WEAK_KEYS.iter().chain(&SEMI_WEAK_KEYS) {
+        // Bit i of `flips` flips the parity bit of byte i.
+        for flips in 0..=u8::MAX {
+            let mut variant = *key;
+            for (i, byte) in variant.iter_mut().enumerate() {
+                *byte ^= (flips >> i) & 1;
+            }
+            assert!(is_weak(&variant), "key {key:02X?}, flips {flips:08b}");
+        }
+    }
+}
+
+#[test]
+fn is_weak_accepts_keys_outside_the_lists() {
+    assert!(!is_weak(&[0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1]));
+    // Flipping the lowest bit that isn't a parity bit must leave the lists.
+    for key in WEAK_KEYS.iter().chain(&SEMI_WEAK_KEYS) {
+        for i in 0..8 {
+            let mut near = *key;
+            near[i] ^= 0x02;
+            assert!(!is_weak(&near), "key {key:02X?}, byte {i}");
         }
     }
 }

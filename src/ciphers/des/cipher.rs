@@ -24,7 +24,9 @@ impl Block for u64 {
 /// `new` accepts any 8 bytes. It doesn't check the parity bits, and the key
 /// schedule ignores them, so keys that differ only in those bits encrypt
 /// identically. Use [`check_parity`](super::parity::check_parity) if the key's parity
-/// matters. The round keys are erased from memory when the cipher is dropped.
+/// matters. It doesn't refuse weak or semi-weak keys either; see
+/// [`is_weak`](super::weak_keys::is_weak). The round keys are erased from memory
+/// when the cipher is dropped.
 ///
 /// It doesn't run in constant time. Each round looks up tables at positions that
 /// depend on the key and the data, so on shared hardware the timing of memory
