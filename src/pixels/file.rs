@@ -88,9 +88,10 @@ pub fn encrypt_image_file<C: BlockCipher>(
 /// `output`, whose extension picks PNG or BMP.
 ///
 /// `cipher` must be built with the key; the mode and its IV come from `meta`.
-/// The input must be the unchanged encrypted image. GCM checks its tag before
-/// anything is written, so a changed pixel or metadata field, or a wrong key, is
-/// refused. The other modes decrypt a changed pixel to wrong pixels without an
+/// The input must be the unchanged encrypted image. When the metadata names GCM,
+/// its tag is checked before anything is written, so a changed pixel or metadata
+/// field, or a wrong key, is refused; see `meta.rs` for why this depends on the
+/// mode byte. The other modes decrypt a changed pixel to wrong pixels without an
 /// error, and miss a wrong key unless the padding of an ECB or CBC tail block
 /// catches it. Nothing is written on failure.
 ///

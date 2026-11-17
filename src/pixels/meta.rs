@@ -17,8 +17,12 @@
 //! ```
 //!
 //! The IV, tail and tag lengths aren't stored, because the other fields determine
-//! them. For GCM, the first 16 bytes are the AAD, so changing any of them fails
-//! authentication. The pixel format is always 8-bit RGB. The key is never stored.
+//! them. For GCM, the first 16 bytes are the AAD, so changing any of them while
+//! the metadata still names GCM fails authentication. The mode byte itself decides
+//! whether a tag is checked: GCM metadata rewritten as CTR, with the nonce followed
+//! by the counter value 2 as its IV and the tag removed, decrypts with no check at
+//! all. Authentication therefore holds only for an image already known to be GCM.
+//! The pixel format is always 8-bit RGB. The key is never stored.
 
 use std::fs;
 use std::io::{Cursor, ErrorKind, Read, Write};
