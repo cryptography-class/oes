@@ -17,8 +17,11 @@
 //! ```
 //!
 //! The IV length isn't stored, because the algorithm and mode determine it.
-//! For GCM the header bytes are the AAD, so a changed header fails
-//! authentication.
+//! For GCM the header bytes are the AAD, so a header changed while it still
+//! names GCM fails authentication. The mode byte itself decides whether a tag
+//! is checked: a GCM container rewritten as CTR, with the nonce followed by the
+//! counter value 2 as its IV, decrypts with no check at all. Authentication
+//! therefore holds only for a container already known to be GCM.
 
 use std::io::{ErrorKind, Read, Write};
 
