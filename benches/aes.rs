@@ -1,8 +1,10 @@
 //! Benchmarks of the AES cipher and its modes in memory, with no file I/O: the
 //! time spent on cryptography alone. The RustCrypto crates `aes`, `ecb`, `cbc`,
 //! `ctr` and `aes-gcm` are benchmarked alongside as the reference implementation,
-//! under names prefixed with `rustcrypto-`. RustCrypto uses the processor's AES instructions
-//! when it has them, so the gap to the textbook implementation is large.
+//! under names prefixed with `rustcrypto-`, and they select their own backend. The other
+//! lines use AES-NI on x86 and x86-64 processors that have it, and the table-based
+//! implementation everywhere else. Building without the `aes-ni` feature selects the
+//! table-based implementation for those lines only.
 //!
 //! Groups:
 //! - `aes-block`: encryption and decryption of one block, and the key schedule,
