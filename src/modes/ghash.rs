@@ -4,9 +4,14 @@
 //! block is its leftmost bit, so loading the 16 bytes as a big-endian `u128` puts
 //! bit `i` of the standard at bit `127 - i` of the integer.
 //!
-//! This is the textbook method, one shift and one conditional XOR per bit. Faster
-//! methods use tables indexed by secret data, which can leak through the cache.
+//! [`gf_mul`] is the textbook method, one shift and one conditional XOR per bit. With
+//! the `pclmulqdq` Cargo feature, which is on by default, processors that have that
+//! instruction multiply with it instead, with the same result. Table-based methods
+//! aren't used, because their tables are indexed by secret data, which can leak through
+//! the cache.
 
+#[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+use super::pclmul::Pclmul;
 use crate::secret::wipe;
 
 pub(super) const BLOCK_LEN: usize = 16;
@@ -39,6 +44,9 @@ pub(super) fn gf_mul(x: u128, y: u128) -> u128 {
 pub(super) struct Ghash {
     h: u128,
     y: u128,
+    /// Set when the processor has `PCLMULQDQ`.
+    #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+    pub(super) pclmul: Option<Pclmul>,
 }
 
 impl Ghash {
@@ -47,6 +55,8 @@ impl Ghash {
         Self {
             h: u128::from_be_bytes(*h),
             y: 0,
+            #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+            pclmul: Pclmul::detect(),
         }
     }
 
@@ -73,6 +83,11 @@ impl Ghash {
 
     /// Absorbs each whole block of `blocks`.
     fn absorb(&mut self, blocks: &[u8]) {
+        #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+        if let Some(pclmul) = self.pclmul {
+            self.y = pclmul.absorb(self.y, self.h, blocks);
+            return;
+        }
         for block in blocks.chunks_exact(BLOCK_LEN) {
             let mut bytes = [0u8; BLOCK_LEN];
             bytes.copy_from_slice(block);

@@ -4,7 +4,8 @@
 //! under names prefixed with `rustcrypto-`, and they select their own backend. The other
 //! lines use AES-NI on x86 and x86-64 processors that have it, and the table-based
 //! implementation everywhere else. Building without the `aes-ni` feature selects the
-//! table-based implementation for those lines only.
+//! table-based implementation for those lines only. In the `gcm` lines, GHASH uses
+//! `PCLMULQDQ` when the processor has it, unless built without the `pclmulqdq` feature.
 //!
 //! Groups:
 //! - `aes-block`: encryption and decryption of one block, and the key schedule,
