@@ -146,4 +146,50 @@ impl<const KEY_SIZE: usize> BlockCipher for AesCipher<KEY_SIZE> {
             Engine::AesNi(keys) => keys.decrypt_block(block),
         }
     }
+
+    /// Encrypts a whole number of blocks held as bytes, in place, each on its own.
+    ///
+    /// On AES-NI the whole buffer is one call, rather than one call per block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `data` isn't a multiple of 16.
+    #[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+    fn encrypt_blocks(&self, data: &mut [u8]) {
+        assert!(
+            data.len().is_multiple_of(Self::BLOCK_SIZE),
+            "data isn't a whole number of blocks"
+        );
+        match &self.engine {
+            Engine::Textbook { .. } => {
+                for block in data.chunks_exact_mut(Self::BLOCK_SIZE) {
+                    self.encrypt_bytes(block);
+                }
+            }
+            Engine::AesNi(keys) => keys.encrypt_blocks(data),
+        }
+    }
+
+    /// Decrypts a whole number of blocks held as bytes, in place, each on its own.
+    ///
+    /// On AES-NI the whole buffer is one call, rather than one call per block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `data` isn't a multiple of 16.
+    #[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+    fn decrypt_blocks(&self, data: &mut [u8]) {
+        assert!(
+            data.len().is_multiple_of(Self::BLOCK_SIZE),
+            "data isn't a whole number of blocks"
+        );
+        match &self.engine {
+            Engine::Textbook { .. } => {
+                for block in data.chunks_exact_mut(Self::BLOCK_SIZE) {
+                    self.decrypt_bytes(block);
+                }
+            }
+            Engine::AesNi(keys) => keys.decrypt_blocks(data),
+        }
+    }
 }

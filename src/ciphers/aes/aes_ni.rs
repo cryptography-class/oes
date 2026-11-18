@@ -263,6 +263,22 @@ fn decrypt_in_place(block: &mut [u8], keys: &RoundKeys, rounds: usize) {
     store(block, _mm_aesdeclast_si128(state, load(&keys[rounds])));
 }
 
+/// Encrypts each whole block of `data` in place, one after another.
+#[target_feature(enable = "aes")]
+fn encrypt_all(data: &mut [u8], keys: &RoundKeys, rounds: usize) {
+    for block in data.chunks_exact_mut(16) {
+        encrypt_in_place(block, keys, rounds);
+    }
+}
+
+/// Decrypts each whole block of `data` in place, one after another.
+#[target_feature(enable = "aes")]
+fn decrypt_all(data: &mut [u8], keys: &RoundKeys, rounds: usize) {
+    for block in data.chunks_exact_mut(16) {
+        decrypt_in_place(block, keys, rounds);
+    }
+}
+
 /// The round keys of one AES key, usable only on a processor with AES-NI.
 pub struct AesNiKeys {
     /// The round keys in the order encryption uses them.
@@ -313,6 +329,20 @@ impl AesNiKeys {
     pub fn decrypt_block(&self, block: &mut [u8; 16]) {
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { decrypt_in_place(block, &self.decrypt, self.rounds) }
+    }
+
+    /// Encrypts the whole blocks of `data` in place. The caller checks that its length
+    /// is a multiple of 16, and any bytes past the last whole block are left as they are.
+    pub fn encrypt_blocks(&self, data: &mut [u8]) {
+        // SAFETY: `empty` is the only constructor, and it checks for these instructions.
+        unsafe { encrypt_all(data, &self.encrypt, self.rounds) }
+    }
+
+    /// Decrypts the whole blocks of `data` in place. The caller checks that its length
+    /// is a multiple of 16, and any bytes past the last whole block are left as they are.
+    pub fn decrypt_blocks(&self, data: &mut [u8]) {
+        // SAFETY: `empty` is the only constructor, and it checks for these instructions.
+        unsafe { decrypt_all(data, &self.decrypt, self.rounds) }
     }
 
     /// Erases the round keys from memory.
