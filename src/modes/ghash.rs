@@ -53,17 +53,12 @@ impl Ghash {
     /// Absorbs `data`, padding a partial last block with zeros. Only the last call
     /// for the AAD and the last call for the ciphertext may be partial.
     pub(super) fn update(&mut self, data: &[u8]) {
-        let mut blocks = data.chunks_exact(BLOCK_LEN);
-        for block in &mut blocks {
-            let mut bytes = [0u8; BLOCK_LEN];
-            bytes.copy_from_slice(block);
-            self.absorb(bytes);
-        }
-        let rest = blocks.remainder();
+        let (blocks, rest) = data.split_at(data.len() - data.len() % BLOCK_LEN);
+        self.absorb(blocks);
         if !rest.is_empty() {
             let mut last = [0u8; BLOCK_LEN];
             last[..rest.len()].copy_from_slice(rest);
-            self.absorb(last);
+            self.absorb(&last);
         }
     }
 
@@ -72,12 +67,17 @@ impl Ghash {
     pub(super) fn finish(&mut self, aad_bytes: u64, ciphertext_bytes: u64) -> [u8; BLOCK_LEN] {
         // Both lengths are below 2^61 bytes, so the bit counts fit in 64 bits.
         let lengths = (u128::from(aad_bytes * 8) << 64) | u128::from(ciphertext_bytes * 8);
-        self.absorb(lengths.to_be_bytes());
+        self.absorb(&lengths.to_be_bytes());
         self.y.to_be_bytes()
     }
 
-    fn absorb(&mut self, block: [u8; BLOCK_LEN]) {
-        self.y = gf_mul(self.y ^ u128::from_be_bytes(block), self.h);
+    /// Absorbs each whole block of `blocks`.
+    fn absorb(&mut self, blocks: &[u8]) {
+        for block in blocks.chunks_exact(BLOCK_LEN) {
+            let mut bytes = [0u8; BLOCK_LEN];
+            bytes.copy_from_slice(block);
+            self.y = gf_mul(self.y ^ u128::from_be_bytes(bytes), self.h);
+        }
     }
 }
 
