@@ -302,8 +302,8 @@ impl AesNiKeys {
         })
     }
 
-    /// Derives the round keys from `key`, in place so that no copy of them is left
-    /// behind when they are wiped. `KEY_SIZE` must be 16, 24 or 32.
+    /// Derives the round keys from `key` and writes them into this value, where
+    /// [`wipe`](Self::wipe) can erase them. `KEY_SIZE` must be 16, 24 or 32.
     pub fn expand_key<const KEY_SIZE: usize>(&mut self, key: &[u8; KEY_SIZE]) {
         self.rounds = KEY_SIZE / 4 + 6;
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
@@ -345,7 +345,9 @@ impl AesNiKeys {
         unsafe { decrypt_all(data, &self.decrypt, self.rounds) }
     }
 
-    /// Erases the round keys from memory.
+    /// Erases the stored round keys from memory.
+    ///
+    /// Copies that key expansion left in registers or on the stack can remain.
     pub fn wipe(&mut self) {
         wipe(&mut self.encrypt);
         wipe(&mut self.decrypt);
