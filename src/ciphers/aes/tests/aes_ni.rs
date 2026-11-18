@@ -4,6 +4,7 @@
 
 use super::{SCHEDULE_128, SCHEDULE_192, SCHEDULE_256, ScheduleVector, array};
 use crate::ciphers::aes::aes_ni::AesNiKeys;
+use crate::ciphers::aes::cipher::Engine;
 use crate::ciphers::aes::key_schedule::{MAX_WORDS, expand_key};
 use crate::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher, round};
 use crate::ciphers::traits::{BlockCipher, KeyInit};
@@ -28,6 +29,16 @@ fn hardware_keys<const N: usize>(key: &[u8; N]) -> Option<AesNiKeys> {
 fn schedule_word(keys: &AesNiKeys, i: usize) -> u32 {
     let bytes = &keys.encrypt[i / 4][(i % 4) * 4..][..4];
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+// ---- detect ----
+
+/// The other tests here skip themselves without AES-NI and pass on either engine, so
+/// only this one fails if detection stops finding the instructions.
+#[test]
+fn detect_selects_aes_ni_exactly_when_the_processor_has_it() {
+    let available = is_x86_feature_detected!("aes") && is_x86_feature_detected!("sse2");
+    assert_eq!(matches!(Engine::detect(), Engine::AesNi(_)), available);
 }
 
 // ---- expand_key ----

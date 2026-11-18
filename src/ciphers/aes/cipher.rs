@@ -67,7 +67,7 @@ pub struct AesCipher<const KEY_SIZE: usize> {
     clippy::large_enum_variant,
     reason = "boxing the round keys would add a pointer to follow for every block"
 )]
-enum Engine {
+pub(super) enum Engine {
     /// The table-based implementation.
     Textbook {
         /// The key schedule `w` of FIPS 197. Words past `4 * (Nr + 1)` stay unused.
@@ -82,7 +82,7 @@ enum Engine {
 
 impl Engine {
     /// Picks the fastest implementation this processor can run, with blank round keys.
-    fn detect() -> Self {
+    pub(super) fn detect() -> Self {
         #[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
         if let Some(keys) = AesNiKeys::empty() {
             return Self::AesNi(keys);
