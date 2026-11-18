@@ -8,9 +8,15 @@
 //! - `round` holds the round transformations and the full cipher and inverse cipher.
 //! - `tables` holds the S-box, its inverse and the round constants.
 //!
+//! With the `aes-ni` Cargo feature on x86 and x86-64, `aes_ni` runs the same cipher on
+//! the processor's AES instructions. The choice is made when a cipher is built, and
+//! the code above is used on processors without those instructions.
+//!
 //! [`AesCipher`] is the entry point, with the aliases [`Aes128Cipher`],
 //! [`Aes192Cipher`] and [`Aes256Cipher`].
 
+#[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+mod aes_ni;
 pub mod cipher;
 mod key_schedule;
 mod round;

@@ -3,6 +3,9 @@ use super::tables::{INV_SBOX, SBOX};
 use super::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use crate::ciphers::traits::KeyInit;
 
+#[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+mod aes_ni;
+
 /// Parses hex digits, ignoring whitespace.
 fn hex(text: &str) -> Vec<u8> {
     let digits: Vec<u8> = text
@@ -64,8 +67,47 @@ fn inv_sbox_inverts_sbox() {
 
 // ---- expand_key ----
 
+/// A key, its `Nr`, and some words of its schedule as `(index, word)`.
+type ScheduleVector = (&'static str, usize, &'static [(usize, u32)]);
+
+/// FIPS 197 Appendix A.1.
+const SCHEDULE_128: ScheduleVector = (
+    "2b7e151628aed2a6abf7158809cf4f3c",
+    10,
+    &[
+        (0, 0x2b7e1516),
+        (4, 0xa0fafe17),
+        (40, 0xd014f9a8),
+        (43, 0xb6630ca6),
+    ],
+);
+
+/// FIPS 197 Appendix A.2.
+const SCHEDULE_192: ScheduleVector = (
+    "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
+    12,
+    &[
+        (5, 0x522c6b7b),
+        (6, 0xfe0c91f7),
+        (48, 0xe98ba06f),
+        (51, 0x01002202),
+    ],
+);
+
+/// FIPS 197 Appendix A.3, which also covers the extra SubWord of 256-bit keys.
+const SCHEDULE_256: ScheduleVector = (
+    "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
+    14,
+    &[
+        (8, 0x9ba35411),
+        (12, 0xa8b09c1a),
+        (56, 0xfe4890d1),
+        (59, 0x706c631e),
+    ],
+);
+
 /// Checks `Nr`, the listed words of the schedule, and that words past its end stay unused.
-fn check_schedule<const N: usize>(key: &str, rounds: usize, expected: &[(usize, u32)]) {
+fn check_schedule<const N: usize>((key, rounds, expected): ScheduleVector) {
     let mut w = [0; MAX_WORDS];
     assert_eq!(expand_key(&array::<N>(key), &mut w), rounds, "key {key}");
     for &(i, word) in expected {
@@ -77,39 +119,11 @@ fn check_schedule<const N: usize>(key: &str, rounds: usize, expected: &[(usize, 
     );
 }
 
-/// FIPS 197 Appendices A.1, A.2 and A.3. A.3 also covers the extra SubWord of 256-bit keys.
 #[test]
 fn expand_key_known_answer_fips_197() {
-    check_schedule::<16>(
-        "2b7e151628aed2a6abf7158809cf4f3c",
-        10,
-        &[
-            (0, 0x2b7e1516),
-            (4, 0xa0fafe17),
-            (40, 0xd014f9a8),
-            (43, 0xb6630ca6),
-        ],
-    );
-    check_schedule::<24>(
-        "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b",
-        12,
-        &[
-            (5, 0x522c6b7b),
-            (6, 0xfe0c91f7),
-            (48, 0xe98ba06f),
-            (51, 0x01002202),
-        ],
-    );
-    check_schedule::<32>(
-        "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4",
-        14,
-        &[
-            (8, 0x9ba35411),
-            (12, 0xa8b09c1a),
-            (56, 0xfe4890d1),
-            (59, 0x706c631e),
-        ],
-    );
+    check_schedule::<16>(SCHEDULE_128);
+    check_schedule::<24>(SCHEDULE_192);
+    check_schedule::<32>(SCHEDULE_256);
 }
 
 // ---- encrypt_block and decrypt_block ----
