@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.87"
 
 [features]
-default = ["interleave", "aes-ni"]
+default = ["interleave", "aes-ni", "pclmulqdq"]
 # Experimental: DES encrypts and decrypts four independent blocks together in
 # `encrypt_blocks` and `decrypt_blocks`. Interleaving isn't part of FIPS 46-3, and
 # the output is the same with or without it.
@@ -13,6 +13,9 @@ interleave = []
 # AES runs on the processor's AES instructions on x86 and x86-64 when they are
 # available. The output is the same with or without it.
 aes-ni = []
+# GHASH runs on the processor's carry-less multiply instruction on x86 and x86-64
+# when it is available. The output is the same with or without it.
+pclmulqdq = []
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

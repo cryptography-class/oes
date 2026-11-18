@@ -28,6 +28,8 @@ mod ecb;
 pub mod errors;
 pub mod gcm;
 mod ghash;
+#[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+mod pclmul;
 mod traits;
 
 pub use cbc::Cbc;

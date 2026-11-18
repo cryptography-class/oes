@@ -4,15 +4,17 @@
 //! under names prefixed with `rustcrypto-`, and they select their own backend. The other
 //! lines use AES-NI on x86 and x86-64 processors that have it, and the table-based
 //! implementation everywhere else. Building without the `aes-ni` feature selects the
-//! table-based implementation for those lines only.
+//! table-based implementation for those lines only. In the `gcm` lines, GHASH uses
+//! `PCLMULQDQ` when the processor has it, unless built without the `pclmulqdq` feature.
 //!
 //! Groups:
 //! - `aes-block`: encryption and decryption of one block, and the key schedule,
 //!   for each key size.
 //! - `aes-mode-encrypt` and `aes-mode-decrypt`: AES-128 in ECB, CBC and CTR over
-//!   each of the shared input sizes, in place on one buffer. GCM is only in
-//!   `aes-mode-encrypt`: decryption does the same work, and the in-place buffer
-//!   would no longer match its tag after the first run.
+//!   each of the shared input sizes, in place on one buffer. GCM runs with AES-128
+//!   and AES-256 (`gcm-256`), and is only in `aes-mode-encrypt`: decryption does the
+//!   same work, and the in-place buffer would no longer match its tag after the
+//!   first run.
 //!
 //! ECB is insecure and must not be used to protect real data.
 
@@ -26,8 +28,8 @@ use aes::cipher::{
     BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit,
     StreamCipher,
 };
-use aes_gcm::Aes128Gcm;
 use aes_gcm::aead::AeadInOut;
+use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use common::{SIZES, id, payload, set_size, size_group};
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
@@ -140,6 +142,7 @@ fn bench_in_place<M>(
 
 fn aes_mode_encrypt(c: &mut Criterion) {
     let mut group = size_group(c, "aes-mode-encrypt");
+    let key_256 = key::<32>();
     let key = key::<16>();
     for size in SIZES {
         let label = set_size(&mut group, size);
@@ -175,6 +178,17 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             &label,
             buf,
             || GcmEncryptor::new(Aes128Cipher::new(&key), &NONCE, &[]).unwrap(),
+            |mut mode, data| {
+                mode.update(data).unwrap();
+                black_box(mode.finish());
+            },
+        );
+        bench_in_place(
+            &mut group,
+            "gcm-256",
+            &label,
+            buf,
+            || GcmEncryptor::new(Aes256Cipher::new(&key_256), &NONCE, &[]).unwrap(),
             |mut mode, data| {
                 mode.update(data).unwrap();
                 black_box(mode.finish());
@@ -217,6 +231,17 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             &label,
             buf,
             || <Aes128Gcm as aes_gcm::KeyInit>::new(&key.into()),
+            |mode, data| {
+                let tag = mode.encrypt_inout_detached(&NONCE.into(), &[], data.into());
+                black_box(tag.unwrap());
+            },
+        );
+        bench_in_place(
+            &mut group,
+            "rustcrypto-gcm-256",
+            &label,
+            buf,
+            || <Aes256Gcm as aes_gcm::KeyInit>::new(&key_256.into()),
             |mode, data| {
                 let tag = mode.encrypt_inout_detached(&NONCE.into(), &[], data.into());
                 black_box(tag.unwrap());
