@@ -1,4 +1,4 @@
-use super::{PAR_BLOCKS, POOLS, in_pool, sample};
+use super::{CHUNK, PAR_BLOCKS, POOLS, in_pool, sample};
 use crate::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use crate::ciphers::des::DesCipher;
 use crate::ciphers::traits::KeyInit;
@@ -203,6 +203,37 @@ fn gcm_parallel_matches_sequential() {
             });
         }
     }
+}
+
+/// Two parallel calls, each longer than a piece: the second has to start from the
+/// counter and the hash that the pieces of the first left behind. The message ends in
+/// a partial block.
+#[test]
+fn gcm_parallel_keeps_the_counter_and_hash_between_calls() {
+    let plaintext = sample((2 * CHUNK + CHUNK / 2) * 16 + 7);
+    let (expected, expected_tag) = seal(&KEY, &NONCE, AAD, &plaintext);
+    let split = (CHUNK + 5) * 16;
+
+    in_pool(2, || {
+        let mut data = plaintext.clone();
+        let mut gcm = GcmEncryptor::new(Aes128Cipher::new(&KEY), &NONCE, AAD)
+            .unwrap()
+            .parallel(true);
+        let (first, second) = data.split_at_mut(split);
+        gcm.update(first).unwrap();
+        gcm.update(second).unwrap();
+        assert_eq!(data, expected);
+        assert_eq!(gcm.finish(), expected_tag);
+
+        let mut gcm = GcmDecryptor::new(Aes128Cipher::new(&KEY), &NONCE, AAD)
+            .unwrap()
+            .parallel(true);
+        let (first, second) = data.split_at_mut(split);
+        gcm.update(first).unwrap();
+        gcm.update(second).unwrap();
+        assert_eq!(gcm.verify(&expected_tag), Ok(()));
+        assert_eq!(data, plaintext);
+    });
 }
 
 #[test]

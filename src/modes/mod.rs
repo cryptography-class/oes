@@ -17,9 +17,9 @@
 //! Use a new instance for each encryption or decryption run.
 //!
 //! Each mode can split its work between the threads of a Rayon pool, with the
-//! same output as on one thread. This covers ECB, CTR, CBC decryption and the
-//! counter step of GCM. CBC encryption always runs on one thread, because each
-//! block needs the ciphertext of the block before it, and so does GHASH.
+//! same output as on one thread. This covers ECB, CTR, CBC decryption and GCM,
+//! where each thread hashes the pieces it encrypts. CBC encryption always runs on
+//! one thread, because each block needs the ciphertext of the block before it.
 
 mod blocks;
 mod cbc;

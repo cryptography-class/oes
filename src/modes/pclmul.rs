@@ -180,4 +180,10 @@ impl Pclmul {
         // SAFETY: `detect` is the only constructor, and it checks for these instructions.
         unsafe { absorb_all(y, h, blocks) }
     }
+
+    /// Returns `a * b` in GF(2^128), with the same result as the textbook `gf_mul`.
+    pub(super) fn multiply(self, a: u128, b: u128) -> u128 {
+        // SAFETY: `detect` is the only constructor, and it checks for these instructions.
+        unsafe { to_u128(multiply(from_u128(a), from_u128(b))) }
+    }
 }
