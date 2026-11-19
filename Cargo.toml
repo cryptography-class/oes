@@ -2,10 +2,10 @@
 name = "oes"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.89"
 
 [features]
-default = ["interleave", "aes-ni", "pclmulqdq"]
+default = ["interleave", "aes-ni", "vaes", "pclmulqdq"]
 # Experimental: DES encrypts and decrypts four independent blocks together in
 # `encrypt_blocks` and `decrypt_blocks`. Interleaving isn't part of FIPS 46-3, and
 # the output is the same with or without it.
@@ -13,6 +13,10 @@ interleave = []
 # AES runs on the processor's AES instructions on x86 and x86-64 when they are
 # available. The output is the same with or without it.
 aes-ni = []
+# On x86-64, whole groups of 16 AES blocks run on the processor's 256-bit AES
+# instructions when they are available, two blocks per instruction. The output is
+# the same with or without it.
+vaes = ["aes-ni"]
 # GHASH runs on the processor's carry-less multiply instruction on x86 and x86-64
 # when it is available. The output is the same with or without it.
 pclmulqdq = []
@@ -57,3 +61,10 @@ harness = false
 [[bench]]
 name = "stream"
 harness = false
+
+# Suggestions that Rust 1.89 makes available: `as_chunks` in place of `chunks_exact`
+# with a constant size, and let chains in place of nested `if let`. The code doesn't
+# use them yet.
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
