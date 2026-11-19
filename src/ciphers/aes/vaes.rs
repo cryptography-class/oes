@@ -15,10 +15,11 @@
 //! them first, so holding one proves that the check passed.
 
 use std::arch::x86_64::{
-    __m256i, _mm_loadu_si128, _mm_set_epi8, _mm256_add_epi64, _mm256_aesdec_epi128,
-    _mm256_aesdeclast_epi128, _mm256_aesenc_epi128, _mm256_aesenclast_epi128,
-    _mm256_broadcastsi128_si256, _mm256_loadu_si256, _mm256_set_epi64x, _mm256_setzero_si256,
-    _mm256_shuffle_epi8, _mm256_storeu_si256, _mm256_xor_si256,
+    __m256i, _mm_loadu_si128, _mm_set_epi8, _mm_storeu_si128, _mm256_add_epi64,
+    _mm256_aesdec_epi128, _mm256_aesdeclast_epi128, _mm256_aesenc_epi128, _mm256_aesenclast_epi128,
+    _mm256_broadcastsi128_si256, _mm256_extracti128_si256, _mm256_loadu_si256,
+    _mm256_permute2x128_si256, _mm256_set_epi64x, _mm256_setzero_si256, _mm256_shuffle_epi8,
+    _mm256_storeu_si256, _mm256_xor_si256,
 };
 
 /// The number of registers in a group, each holding two blocks.
@@ -173,6 +174,54 @@ fn ctr_apply_groups<'a>(counter: &mut [u8], data: &'a mut [u8], keys: &[[u8; 16]
     groups.into_remainder()
 }
 
+/// Decrypts each whole group of `data` in place in CBC mode, chained from `chain`, the
+/// ciphertext block before it, and returns the bytes after the last group. `chain` is
+/// left holding the last ciphertext block of the last group. `keys` holds the `Nr + 1`
+/// round keys of the equivalent inverse cipher.
+///
+/// Each register holds a pair of ciphertext blocks, which stay in registers for the
+/// XOR step. Pair `j` is XORed with the two blocks one position earlier: the high half
+/// of pair `j - 1` and the low half of pair `j`, which `_mm256_permute2x128_si256`
+/// puts together. For the first pair of a group, the high half of `before` holds the
+/// block before the group.
+#[target_feature(enable = "aes,avx2,vaes")]
+fn cbc_decrypt_groups<'a>(
+    chain: &mut [u8; 16],
+    data: &'a mut [u8],
+    keys: &[[u8; 16]],
+) -> &'a mut [u8] {
+    let rounds = keys.len() - 1;
+    let wide = wide_keys(keys);
+    // SAFETY: `chain` is 16 readable bytes, and this load has no alignment requirement.
+    let mut before = _mm256_broadcastsi128_si256(unsafe { _mm_loadu_si128(chain.as_ptr().cast()) });
+    let mut groups = data.chunks_exact_mut(GROUP_LEN);
+    for group in &mut groups {
+        let mut ciphertext = [_mm256_setzero_si256(); WIDE];
+        let mut states = [_mm256_setzero_si256(); WIDE];
+        for (j, pair) in group.chunks_exact(32).enumerate() {
+            ciphertext[j] = load(pair);
+            states[j] = _mm256_xor_si256(ciphertext[j], wide[0]);
+        }
+        for key in &wide[1..rounds] {
+            for state in &mut states {
+                *state = _mm256_aesdec_epi128(*state, *key);
+            }
+        }
+        for (j, pair) in group.chunks_exact_mut(32).enumerate() {
+            let earlier = if j == 0 { before } else { ciphertext[j - 1] };
+            let shifted = _mm256_permute2x128_si256::<0x21>(earlier, ciphertext[j]);
+            let decrypted = _mm256_aesdeclast_epi128(states[j], wide[rounds]);
+            store(pair, _mm256_xor_si256(decrypted, shifted));
+        }
+        before = ciphertext[WIDE - 1];
+    }
+    let last = _mm256_extracti128_si256::<1>(before);
+    // SAFETY: `chain` is 16 writable bytes through this exclusive reference, and this
+    // store has no alignment requirement.
+    unsafe { _mm_storeu_si128(chain.as_mut_ptr().cast(), last) };
+    groups.into_remainder()
+}
+
 /// Proof that the processor has AES-NI, AVX2 and VAES.
 #[derive(Clone, Copy)]
 pub(super) struct Vaes(());
@@ -227,5 +276,24 @@ impl Vaes {
     ) -> &'a mut [u8] {
         // SAFETY: `detect` is the only constructor, and it checks for these instructions.
         unsafe { ctr_apply_groups(counter, data, keys) }
+    }
+
+    /// Decrypts each whole group of 16 blocks of `data` in place in CBC mode, chained
+    /// from `chain`, the ciphertext block before it, and returns the bytes after the
+    /// last group. `chain` is left holding the last ciphertext block of the last group,
+    /// which those bytes chain from. `keys` holds the `Nr + 1` round keys of the
+    /// equivalent inverse cipher.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `keys` is empty or holds more than 15 keys.
+    pub(super) fn cbc_decrypt_groups<'a>(
+        self,
+        chain: &mut [u8; 16],
+        data: &'a mut [u8],
+        keys: &[[u8; 16]],
+    ) -> &'a mut [u8] {
+        // SAFETY: `detect` is the only constructor, and it checks for these instructions.
+        unsafe { cbc_decrypt_groups(chain, data, keys) }
     }
 }

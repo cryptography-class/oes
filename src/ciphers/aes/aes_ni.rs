@@ -543,13 +543,23 @@ impl AesNiKeys {
     }
 
     /// Decrypts the whole blocks of `data` in place in CBC mode, chained from `prev`,
-    /// the ciphertext block before it. The caller checks that the length of `data` is
-    /// a multiple of 16, and any bytes past the last whole block are left as they are.
+    /// the ciphertext block before it, with whole groups of 16 blocks on VAES when the
+    /// processor has it. The caller checks that the length of `data` is a multiple of
+    /// 16, and any bytes past the last whole block are left as they are.
     ///
     /// # Panics
     ///
     /// Panics if `prev` isn't exactly 16 bytes long.
     pub fn decrypt_cbc(&self, prev: &[u8], data: &mut [u8]) {
+        #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+        if let Some(vaes) = self.vaes {
+            let mut chain = [0u8; 16];
+            chain.copy_from_slice(prev);
+            let rest = vaes.cbc_decrypt_groups(&mut chain, data, &self.decrypt[..=self.rounds]);
+            // SAFETY: `empty` is the only constructor, and it checks for these instructions.
+            unsafe { cbc_decrypt_all(&chain, rest, &self.decrypt, self.rounds) };
+            return;
+        }
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { cbc_decrypt_all(prev, data, &self.decrypt, self.rounds) }
     }
