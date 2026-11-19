@@ -109,6 +109,24 @@ pub trait BlockCipher: Sync {
         let _ = (prev, data);
         false
     }
+
+    /// Decrypts `data` in CBC mode (NIST SP 800-38A section 6.2), chained from `prev`,
+    /// the ciphertext block before it, if this cipher has a faster way than the mode's
+    /// batches.
+    ///
+    /// Returns `false` without changing anything when it doesn't, so the mode runs its
+    /// own loop. The default always returns `false`. The mode passes one block in
+    /// `prev` and a whole number of blocks in `data`. Unlike
+    /// [`encrypt_cbc`](Self::encrypt_cbc), `prev` is only read: the mode saves the last
+    /// ciphertext block itself before decrypting, because decryption overwrites it.
+    ///
+    /// # Panics
+    ///
+    /// An override may panic if `prev` isn't one block long.
+    fn decrypt_cbc(&self, prev: &[u8], data: &mut [u8]) -> bool {
+        let _ = (prev, data);
+        false
+    }
 }
 
 /// A block cipher that can be built from a `KEY_SIZE`-byte key.

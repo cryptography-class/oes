@@ -124,8 +124,9 @@ fn cbc_known_answer_fips_81() {
     assert_eq!(&data, PLAINTEXT);
 }
 
-// NIST SP 800-38A Appendix F.2.1, CBC-AES128.Encrypt. Encrypted in two calls, split
-// after each block, so the chain has to carry over between them.
+// NIST SP 800-38A Appendix F.2.1, CBC-AES128.Encrypt, and F.2.2, CBC-AES128.Decrypt.
+// Encrypted and decrypted in two calls, split after each block, so the chain has to
+// carry over between them.
 #[test]
 fn cbc_known_answer_sp_800_38a_aes() {
     let key = [
@@ -151,12 +152,14 @@ fn cbc_known_answer_sp_800_38a_aes() {
         let (first, second) = buffer.split_at_mut(split * 16);
         cbc.encrypt(first).unwrap();
         cbc.encrypt(second).unwrap();
-        assert_eq!(buffer, ciphertext, "split at block {split}");
-    }
+        assert_eq!(buffer, ciphertext, "encrypt, split at block {split}");
 
-    let mut buffer = ciphertext;
-    Cbc::new(Aes128Cipher::new(&key), &iv).unwrap().decrypt(&mut buffer).unwrap();
-    assert_eq!(buffer, plaintext);
+        let mut cbc = Cbc::new(Aes128Cipher::new(&key), &iv).unwrap();
+        let (first, second) = buffer.split_at_mut(split * 16);
+        cbc.decrypt(first).unwrap();
+        cbc.decrypt(second).unwrap();
+        assert_eq!(buffer, plaintext, "decrypt, split at block {split}");
+    }
 }
 
 #[test]

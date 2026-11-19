@@ -135,11 +135,16 @@ impl<C: BlockCipher> Cbc<C> {
 /// Decrypts the block-aligned `data` in place, chained from `start`, the ciphertext
 /// block before it.
 ///
-/// The blocks are decrypted [`BATCH_BLOCKS`] at a time. Each batch's ciphertext is
-/// copied first, because decrypting in place overwrites the blocks that the XOR
-/// step needs.
+/// The cipher takes over the whole chain if it can, through
+/// [`BlockCipher::decrypt_cbc`]. Otherwise the blocks are decrypted [`BATCH_BLOCKS`]
+/// at a time. Each batch's ciphertext is copied first, because decrypting in place
+/// overwrites the blocks that the XOR step needs.
 #[inline]
 fn decrypt_chain<C: BlockCipher>(cipher: &C, data: &mut [u8], start: &[u8]) {
+    if cipher.decrypt_cbc(start, data) {
+        return;
+    }
+
     let block_size = C::BLOCK_SIZE;
     let mut saved = [0u8; BATCH_BLOCKS * MAX_BLOCK_LEN];
     let mut prev = [0u8; MAX_BLOCK_LEN];

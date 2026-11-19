@@ -341,6 +341,45 @@ fn cbc_encrypt_all(prev: &mut [u8], data: &mut [u8], keys: &RoundKeys, rounds: u
     store(prev, chain);
 }
 
+/// Decrypts each whole block of `data` in place in CBC mode, chained from `prev`, the
+/// ciphertext block before it. Blocks go through the rounds [`LANES`] at a time, and
+/// their ciphertext stays in registers for the XOR step instead of being copied aside.
+#[target_feature(enable = "aes")]
+fn cbc_decrypt_all(prev: &[u8], data: &mut [u8], keys: &RoundKeys, rounds: usize) {
+    let first = load(&keys[0]);
+    let last = load(&keys[rounds]);
+    let mut chain = load(prev);
+    let mut groups = data.chunks_exact_mut(LANES * 16);
+    for group in &mut groups {
+        let mut ciphertext = [_mm_setzero_si128(); LANES];
+        let mut states = [_mm_setzero_si128(); LANES];
+        for (i, block) in group.chunks_exact(16).enumerate() {
+            ciphertext[i] = load(block);
+            states[i] = _mm_xor_si128(ciphertext[i], first);
+        }
+        for key in &keys[1..rounds] {
+            let key = load(key);
+            for state in &mut states {
+                *state = _mm_aesdec_si128(*state, key);
+            }
+        }
+        // Block 0 chains from the block before the group, and every later block from
+        // the ciphertext block just before it.
+        for (i, block) in group.chunks_exact_mut(16).enumerate() {
+            let before = if i == 0 { chain } else { ciphertext[i - 1] };
+            let decrypted = _mm_aesdeclast_si128(states[i], last);
+            store(block, _mm_xor_si128(decrypted, before));
+        }
+        chain = ciphertext[LANES - 1];
+    }
+    for block in groups.into_remainder().chunks_exact_mut(16) {
+        let saved = load(block);
+        decrypt_in_place(block, keys, rounds);
+        store(block, _mm_xor_si128(load(block), chain));
+        chain = saved;
+    }
+}
+
 /// The round keys of one AES key, usable only on a processor with AES-NI.
 pub struct AesNiKeys {
     /// The round keys in the order encryption uses them.
@@ -418,6 +457,18 @@ impl AesNiKeys {
     pub fn encrypt_cbc(&self, prev: &mut [u8], data: &mut [u8]) {
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { cbc_encrypt_all(prev, data, &self.encrypt, self.rounds) }
+    }
+
+    /// Decrypts the whole blocks of `data` in place in CBC mode, chained from `prev`,
+    /// the ciphertext block before it. The caller checks that the length of `data` is
+    /// a multiple of 16, and any bytes past the last whole block are left as they are.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `prev` isn't exactly 16 bytes long.
+    pub fn decrypt_cbc(&self, prev: &[u8], data: &mut [u8]) {
+        // SAFETY: `empty` is the only constructor, and it checks for these instructions.
+        unsafe { cbc_decrypt_all(prev, data, &self.decrypt, self.rounds) }
     }
 
     /// Erases the stored round keys from memory.

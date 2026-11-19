@@ -174,3 +174,14 @@ fn encrypt_cbc_runs_on_aes_ni_exactly_when_the_processor_has_it() {
     let (mut prev, mut data) = ([0; 16], [0; 16]);
     assert_eq!(Aes128Cipher::new(&[0; 16]).encrypt_cbc(&mut prev, &mut data), on_aes_ni);
 }
+
+// ---- decrypt_cbc ----
+
+/// The output is checked through the CBC mode's tests, which pass on either path, so
+/// only this one fails if AES-NI stops taking over CBC decryption.
+#[test]
+fn decrypt_cbc_runs_on_aes_ni_exactly_when_the_processor_has_it() {
+    let on_aes_ni = matches!(Engine::detect(), Engine::AesNi(_));
+    let cipher = Aes128Cipher::new(&[0; 16]);
+    assert_eq!(cipher.decrypt_cbc(&[0; 16], &mut [0; 16]), on_aes_ni);
+}
