@@ -117,7 +117,8 @@ fn encrypt_block_matches_textbook() {
 // ---- encrypt_blocks and decrypt_blocks ----
 
 /// Checks whole buffers against the same blocks processed one at a time, at lengths
-/// of none, one, a few, and more than the 16 blocks the modes pass in one call.
+/// of none, one, a few, and more than the 16 blocks the modes pass in one call. On
+/// AES-NI, 17 blocks are two groups of 8 and one block left over.
 fn check_blocks_match_single_blocks<C, const N: usize>()
 where
     C: KeyInit<N, Block = [u8; 16]>,
