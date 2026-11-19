@@ -14,7 +14,8 @@
 //!   each of the shared input sizes, in place on one buffer. GCM runs with AES-128
 //!   and AES-256 (`gcm-256`), and is only in `aes-mode-encrypt`: decryption does the
 //!   same work, and the in-place buffer would no longer match its tag after the
-//!   first run.
+//!   first run. The `gcm-aad-only` lines hash the buffer as AAD with no plaintext,
+//!   which times GHASH on its own.
 //!
 //! ECB is insecure and must not be used to protect real data.
 
@@ -195,6 +196,19 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             },
         );
 
+        // Building the mode absorbs the AAD, so it runs inside the timing here.
+        bench_in_place(
+            &mut group,
+            "gcm-aad-only",
+            &label,
+            buf,
+            || Aes128Cipher::new(&key),
+            |cipher, data| {
+                let mode = GcmEncryptor::new(cipher, &NONCE, &*data).unwrap();
+                black_box(mode.finish());
+            },
+        );
+
         bench_in_place(
             &mut group,
             "rustcrypto-ecb",
@@ -244,6 +258,18 @@ fn aes_mode_encrypt(c: &mut Criterion) {
             || <Aes256Gcm as aes_gcm::KeyInit>::new(&key_256.into()),
             |mode, data| {
                 let tag = mode.encrypt_inout_detached(&NONCE.into(), &[], data.into());
+                black_box(tag.unwrap());
+            },
+        );
+        bench_in_place(
+            &mut group,
+            "rustcrypto-gcm-aad-only",
+            &label,
+            buf,
+            || <Aes128Gcm as aes_gcm::KeyInit>::new(&key.into()),
+            |mode, data| {
+                let empty: &mut [u8] = &mut [];
+                let tag = mode.encrypt_inout_detached(&NONCE.into(), &*data, empty.into());
                 black_box(tag.unwrap());
             },
         );
