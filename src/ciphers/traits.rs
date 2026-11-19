@@ -127,6 +127,23 @@ pub trait BlockCipher: Sync {
         let _ = (prev, data);
         false
     }
+
+    /// XORs the CTR keystream (NIST SP 800-38A section 6.5) that starts at `counter`
+    /// into `data`, if this cipher has a faster way than the mode's batches, and leaves
+    /// `counter` one past the last block used.
+    ///
+    /// Returns `false` without changing anything when it doesn't, so the mode runs its
+    /// own loop. The default always returns `false`. The mode passes one block in
+    /// `counter`, a big-endian number that wraps at the block size, and `data` of any
+    /// length. A partial last block uses the start of its keystream block.
+    ///
+    /// # Panics
+    ///
+    /// An override may panic if `counter` isn't one block long.
+    fn apply_ctr(&self, counter: &mut [u8], data: &mut [u8]) -> bool {
+        let _ = (counter, data);
+        false
+    }
 }
 
 /// A block cipher that can be built from a `KEY_SIZE`-byte key.
