@@ -163,3 +163,14 @@ fn encrypt_blocks_panics_on_a_partial_block() {
 fn decrypt_blocks_panics_on_a_partial_block() {
     Aes128Cipher::new(&[0; 16]).decrypt_blocks(&mut [0; 24]);
 }
+
+// ---- encrypt_cbc ----
+
+/// The output is checked through the CBC mode's tests, which pass on either path, so
+/// only this one fails if AES-NI stops taking over CBC encryption.
+#[test]
+fn encrypt_cbc_runs_on_aes_ni_exactly_when_the_processor_has_it() {
+    let on_aes_ni = matches!(Engine::detect(), Engine::AesNi(_));
+    let (mut prev, mut data) = ([0; 16], [0; 16]);
+    assert_eq!(Aes128Cipher::new(&[0; 16]).encrypt_cbc(&mut prev, &mut data), on_aes_ni);
+}

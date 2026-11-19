@@ -93,6 +93,22 @@ pub trait BlockCipher: Sync {
             self.decrypt_bytes(block);
         }
     }
+
+    /// Encrypts `data` in CBC mode (NIST SP 800-38A section 6.2), chained from `prev`,
+    /// if this cipher has a faster way than one block at a time, and leaves the last
+    /// ciphertext block in `prev`.
+    ///
+    /// Returns `false` without changing anything when it doesn't, so the mode runs its
+    /// own loop. The default always returns `false`. The mode passes one block in
+    /// `prev` and a whole number of blocks in `data`.
+    ///
+    /// # Panics
+    ///
+    /// An override may panic if `prev` isn't one block long.
+    fn encrypt_cbc(&self, prev: &mut [u8], data: &mut [u8]) -> bool {
+        let _ = (prev, data);
+        false
+    }
 }
 
 /// A block cipher that can be built from a `KEY_SIZE`-byte key.

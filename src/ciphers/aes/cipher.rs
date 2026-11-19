@@ -192,4 +192,21 @@ impl<const KEY_SIZE: usize> BlockCipher for AesCipher<KEY_SIZE> {
             Engine::AesNi(keys) => keys.decrypt_blocks(data),
         }
     }
+
+    /// Encrypts `data` in CBC mode on AES-NI, and returns `false` on the table-based
+    /// implementation, which leaves the work to the mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics on AES-NI if `prev` isn't exactly 16 bytes long.
+    #[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+    fn encrypt_cbc(&self, prev: &mut [u8], data: &mut [u8]) -> bool {
+        match &self.engine {
+            Engine::Textbook { .. } => false,
+            Engine::AesNi(keys) => {
+                keys.encrypt_cbc(prev, data);
+                true
+            }
+        }
+    }
 }

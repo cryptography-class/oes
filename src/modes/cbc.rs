@@ -77,6 +77,9 @@ impl<C: BlockCipher> Cbc<C> {
     pub fn encrypt(&mut self, data: &mut [u8]) -> Result<(), ModeError> {
         let block_size = C::BLOCK_SIZE;
         check_whole_blocks(data.len(), block_size)?;
+        if self.cipher.encrypt_cbc(&mut self.prev[..block_size], data) {
+            return Ok(());
+        }
 
         let mut prev = &self.prev[..block_size];
         for block in data.chunks_exact_mut(block_size) {
