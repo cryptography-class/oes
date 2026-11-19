@@ -38,8 +38,8 @@ jobs:
       - name: Run clippy without default features
         run: cargo clippy --locked --all-targets --no-default-features -- -D warnings
 
-      - name: Run tests with AES-NI but without VAES
+      - name: Run tests without VAES and VPCLMULQDQ
         run: cargo test --locked --verbose --no-default-features --features interleave,aes-ni,pclmulqdq
 
-      - name: Run clippy with AES-NI but without VAES
+      - name: Run clippy without VAES and VPCLMULQDQ
         run: cargo clippy --locked --all-targets --no-default-features --features interleave,aes-ni,pclmulqdq -- -D warnings

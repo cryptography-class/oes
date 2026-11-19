@@ -31,6 +31,8 @@ mod ghash;
 #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
 mod pclmul;
 mod traits;
+#[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+mod vpclmul;
 
 pub use cbc::Cbc;
 pub use ctr::Ctr;

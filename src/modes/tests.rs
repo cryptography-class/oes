@@ -10,6 +10,8 @@ mod gcm;
 mod ghash;
 #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
 mod pclmul;
+#[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+mod vpclmul;
 
 // Tables B1 (ECB) and C1 (CBC) of FIPS 81, DES Modes of Operation.
 const KEY: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];

@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.89"
 
 [features]
-default = ["interleave", "aes-ni", "vaes", "pclmulqdq"]
+default = ["interleave", "aes-ni", "vaes", "pclmulqdq", "vpclmulqdq"]
 # Experimental: DES encrypts and decrypts four independent blocks together in
 # `encrypt_blocks` and `decrypt_blocks`. Interleaving isn't part of FIPS 46-3, and
 # the output is the same with or without it.
@@ -20,6 +20,10 @@ vaes = ["aes-ni"]
 # GHASH runs on the processor's carry-less multiply instruction on x86 and x86-64
 # when it is available. The output is the same with or without it.
 pclmulqdq = []
+# On x86-64, whole groups of 8 GHASH blocks run on the processor's 256-bit carry-less
+# multiply instruction when it is available, two blocks per instruction. The output
+# is the same with or without it.
+vpclmulqdq = ["pclmulqdq"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
