@@ -43,6 +43,18 @@ fn detect_selects_aes_ni_exactly_when_the_processor_has_it() {
     assert_eq!(matches!(Engine::detect(), Engine::AesNi(_)), available);
 }
 
+/// The tests of the VAES path pass on AES-NI alone too, so only this one fails if
+/// detection stops finding the 256-bit instructions.
+#[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+#[test]
+fn empty_uses_vaes_exactly_when_the_processor_has_it() {
+    let Some(keys) = AesNiKeys::empty() else {
+        return;
+    };
+    let available = is_x86_feature_detected!("avx2") && is_x86_feature_detected!("vaes");
+    assert_eq!(keys.vaes.is_some(), available);
+}
+
 // ---- expand_key ----
 
 fn check_schedule<const N: usize>((key, rounds, expected): ScheduleVector) {
@@ -119,14 +131,15 @@ fn encrypt_block_matches_textbook() {
 // ---- encrypt_blocks and decrypt_blocks ----
 
 /// Checks whole buffers against the same blocks processed one at a time, at lengths
-/// of none, one, a few, and more than the 16 blocks the modes pass in one call. On
-/// AES-NI, 17 blocks are two groups of 8 and one block left over.
+/// of none, one, a few, and several groups. On AES-NI alone, 17 blocks are two groups
+/// of 8 and one block left over. With VAES, 33 blocks are two groups of 16 and one
+/// block, and 41 add a group of 8 on AES-NI before the last block.
 fn check_blocks_match_single_blocks<C, const N: usize>()
 where
     C: KeyInit<N, Block = [u8; 16]>,
 {
     let cipher = C::new(&sample_keys::<N>()[2]);
-    for count in [0, 1, 3, 17] {
+    for count in [0, 1, 3, 17, 33, 41] {
         let plaintext: Vec<u8> = (0..count * 16).map(|i| (i * 7 + 3) as u8).collect();
 
         let mut expected = plaintext.clone();

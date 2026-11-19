@@ -11,6 +11,10 @@
 //! processor with AES-NI has. [`AesNiKeys::empty`] is the only way to get an
 //! [`AesNiKeys`] and checks for all of them first, so holding one proves that the
 //! check passed.
+//!
+//! With the `vaes` Cargo feature on x86-64, [`AesNiKeys::empty`] also looks for the
+//! 256-bit AES instructions. When the processor has them, whole groups of 16 blocks go
+//! to the `vaes` module first, and the loops here handle the blocks left over.
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86 as arch;
@@ -25,6 +29,8 @@ use arch::{
     _mm_xor_si128,
 };
 
+#[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+use super::vaes::Vaes;
 use crate::secret::wipe;
 
 /// Round keys as bytes in FIPS 197 order, with room for the 15 of a 256-bit key.
@@ -445,6 +451,9 @@ pub struct AesNiKeys {
     decrypt: RoundKeys,
     /// `Nr`, the number of rounds.
     pub(super) rounds: usize,
+    /// Present when the processor has VAES, which then takes whole groups of 16 blocks.
+    #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+    pub(super) vaes: Option<Vaes>,
 }
 
 impl AesNiKeys {
@@ -460,6 +469,8 @@ impl AesNiKeys {
             encrypt: [[0; 16]; 15],
             decrypt: [[0; 16]; 15],
             rounds: 0,
+            #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+            vaes: Vaes::detect(),
         })
     }
 
@@ -492,16 +503,28 @@ impl AesNiKeys {
         unsafe { decrypt_in_place(block, &self.decrypt, self.rounds) }
     }
 
-    /// Encrypts the whole blocks of `data` in place. The caller checks that its length
-    /// is a multiple of 16, and any bytes past the last whole block are left as they are.
+    /// Encrypts the whole blocks of `data` in place, with whole groups of 16 blocks on
+    /// VAES when the processor has it. The caller checks that its length is a multiple
+    /// of 16, and any bytes past the last whole block are left as they are.
     pub fn encrypt_blocks(&self, data: &mut [u8]) {
+        #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+        let data = match self.vaes {
+            Some(vaes) => vaes.encrypt_groups(data, &self.encrypt[..=self.rounds]),
+            None => data,
+        };
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { encrypt_all(data, &self.encrypt, self.rounds) }
     }
 
-    /// Decrypts the whole blocks of `data` in place. The caller checks that its length
-    /// is a multiple of 16, and any bytes past the last whole block are left as they are.
+    /// Decrypts the whole blocks of `data` in place, with whole groups of 16 blocks on
+    /// VAES when the processor has it. The caller checks that its length is a multiple
+    /// of 16, and any bytes past the last whole block are left as they are.
     pub fn decrypt_blocks(&self, data: &mut [u8]) {
+        #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+        let data = match self.vaes {
+            Some(vaes) => vaes.decrypt_groups(data, &self.decrypt[..=self.rounds]),
+            None => data,
+        };
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { decrypt_all(data, &self.decrypt, self.rounds) }
     }

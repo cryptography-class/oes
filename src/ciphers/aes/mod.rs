@@ -10,7 +10,9 @@
 //!
 //! With the `aes-ni` Cargo feature on x86 and x86-64, `aes_ni` runs the same cipher on
 //! the processor's AES instructions. The choice is made when a cipher is built, and
-//! the code above is used on processors without those instructions.
+//! the code above is used on processors without those instructions. With the `vaes`
+//! Cargo feature on x86-64, `vaes` takes whole groups of 16 blocks from `aes_ni` on
+//! processors with the 256-bit AES instructions.
 //!
 //! [`AesCipher`] is the entry point, with the aliases [`Aes128Cipher`],
 //! [`Aes192Cipher`] and [`Aes256Cipher`].
@@ -21,6 +23,8 @@ pub mod cipher;
 mod key_schedule;
 mod round;
 mod tables;
+#[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+mod vaes;
 
 pub use cipher::{Aes128Cipher, Aes192Cipher, Aes256Cipher, AesCipher};
 
