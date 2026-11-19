@@ -5,7 +5,7 @@
 //! groups of 16, two to each of 8 registers, and each round key is copied into both
 //! halves of a register once per call. Only whole groups are handled here: each
 //! function returns the bytes after the last whole group, and the caller runs them on
-//! AES-NI.
+//! AES-NI. Input shorter than a group comes straight back, before any key is copied.
 //!
 //! This is x86-64 only. 32-bit x86 has 8 vector registers, too few for the 8 states of
 //! a group and a round key.
@@ -73,6 +73,9 @@ fn wide_keys(keys: &[[u8; 16]]) -> [__m256i; 15] {
 /// one. `keys` holds the `Nr + 1` round keys in encryption order.
 #[target_feature(enable = "aes,avx2,vaes")]
 fn encrypt_groups<'a>(data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
+    if data.len() < GROUP_LEN {
+        return data;
+    }
     let rounds = keys.len() - 1;
     let wide = wide_keys(keys);
     let mut groups = data.chunks_exact_mut(GROUP_LEN);
@@ -97,6 +100,9 @@ fn encrypt_groups<'a>(data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
 /// one. `keys` holds the `Nr + 1` round keys of the equivalent inverse cipher.
 #[target_feature(enable = "aes,avx2,vaes")]
 fn decrypt_groups<'a>(data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
+    if data.len() < GROUP_LEN {
+        return data;
+    }
     let rounds = keys.len() - 1;
     let wide = wide_keys(keys);
     let mut groups = data.chunks_exact_mut(GROUP_LEN);
@@ -128,15 +134,18 @@ fn decrypt_groups<'a>(data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
 /// instead, so the carry reaches the high half.
 #[target_feature(enable = "aes,avx2,vaes")]
 fn ctr_apply_groups<'a>(counter: &mut [u8], data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(counter);
+    if data.len() < GROUP_LEN {
+        return data;
+    }
+    let mut value = u128::from_be_bytes(bytes);
     let rounds = keys.len() - 1;
     let wide = wide_keys(keys);
     // Byte i of each half of the result is byte 15 - i of the same half of the input.
     let swap = _mm256_broadcastsi128_si256(_mm_set_epi8(
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     ));
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(counter);
-    let mut value = u128::from_be_bytes(bytes);
     let mut groups = data.chunks_exact_mut(GROUP_LEN);
     for group in &mut groups {
         let low = value as u64;
@@ -190,6 +199,9 @@ fn cbc_decrypt_groups<'a>(
     data: &'a mut [u8],
     keys: &[[u8; 16]],
 ) -> &'a mut [u8] {
+    if data.len() < GROUP_LEN {
+        return data;
+    }
     let rounds = keys.len() - 1;
     let wide = wide_keys(keys);
     // SAFETY: `chain` is 16 readable bytes, and this load has no alignment requirement.
@@ -241,7 +253,8 @@ impl Vaes {
     ///
     /// # Panics
     ///
-    /// Panics if `keys` is empty or holds more than 15 keys.
+    /// Panics if `data` holds a whole group and `keys` is empty or holds more than 15
+    /// keys.
     pub(super) fn encrypt_groups<'a>(self, data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
         // SAFETY: `detect` is the only constructor, and it checks for these instructions.
         unsafe { encrypt_groups(data, keys) }
@@ -253,7 +266,8 @@ impl Vaes {
     ///
     /// # Panics
     ///
-    /// Panics if `keys` is empty or holds more than 15 keys.
+    /// Panics if `data` holds a whole group and `keys` is empty or holds more than 15
+    /// keys.
     pub(super) fn decrypt_groups<'a>(self, data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
         // SAFETY: `detect` is the only constructor, and it checks for these instructions.
         unsafe { decrypt_groups(data, keys) }
@@ -266,8 +280,8 @@ impl Vaes {
     ///
     /// # Panics
     ///
-    /// Panics if `counter` isn't exactly 16 bytes long, or if `keys` is empty or holds
-    /// more than 15 keys.
+    /// Panics if `counter` isn't exactly 16 bytes long, or if `data` holds a whole group
+    /// and `keys` is empty or holds more than 15 keys.
     pub(super) fn ctr_apply_groups<'a>(
         self,
         counter: &mut [u8],
@@ -286,7 +300,8 @@ impl Vaes {
     ///
     /// # Panics
     ///
-    /// Panics if `keys` is empty or holds more than 15 keys.
+    /// Panics if `data` holds a whole group and `keys` is empty or holds more than 15
+    /// keys.
     pub(super) fn cbc_decrypt_groups<'a>(
         self,
         chain: &mut [u8; 16],
