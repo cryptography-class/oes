@@ -126,15 +126,24 @@ fn apply_from<C: BlockCipher>(cipher: &C, counter: &mut [u8], data: &mut [u8]) {
     let block_size = C::BLOCK_SIZE;
     let mut buffer = [0u8; BATCH_BLOCKS * MAX_BLOCK_LEN];
 
+    // The counter is held as an integer, right-aligned in a `u128`. Adding one byte at
+    // a time in memory would stall the 16-byte read of the next counter block.
+    let skip = MAX_BLOCK_LEN - block_size;
+    let mut wide = [0u8; MAX_BLOCK_LEN];
+    wide[skip..].copy_from_slice(counter);
+    let mut value = u128::from_be_bytes(wide);
+    let mask = u128::MAX >> (8 * skip);
+
     for batch in data.chunks_mut(BATCH_BLOCKS * block_size) {
         let keystream = &mut buffer[..batch.len().next_multiple_of(block_size)];
         for block in keystream.chunks_exact_mut(block_size) {
-            block.copy_from_slice(counter);
-            increment(counter);
+            block.copy_from_slice(&value.to_be_bytes()[skip..]);
+            value = value.wrapping_add(1) & mask;
         }
         cipher.encrypt_blocks(keystream);
         xor_into(batch, keystream);
     }
+    counter.copy_from_slice(&value.to_be_bytes()[skip..]);
 }
 
 /// Adds `n` to the big-endian `counter`, wrapping at its length.
@@ -147,15 +156,5 @@ pub(super) fn add(counter: &mut [u8], n: u64) {
         let sum = u64::from(*byte) + (carry & 0xFF);
         *byte = sum as u8;
         carry = (carry >> 8) + (sum >> 8);
-    }
-}
-
-/// Adds 1 to the big-endian `counter`, wrapping at its length.
-fn increment(counter: &mut [u8]) {
-    for byte in counter.iter_mut().rev() {
-        *byte = byte.wrapping_add(1);
-        if *byte != 0 {
-            break;
-        }
     }
 }

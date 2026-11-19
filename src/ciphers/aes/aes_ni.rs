@@ -18,8 +18,8 @@ use std::arch::x86_64 as arch;
 use arch::{
     __m128i, _mm_aesdec_si128, _mm_aesdeclast_si128, _mm_aesenc_si128, _mm_aesenclast_si128,
     _mm_aesimc_si128, _mm_aeskeygenassist_si128, _mm_loadl_epi64, _mm_loadu_si128,
-    _mm_shuffle_epi32, _mm_slli_si128, _mm_srli_si128, _mm_storeu_si128, _mm_unpacklo_epi64,
-    _mm_xor_si128,
+    _mm_setzero_si128, _mm_shuffle_epi32, _mm_slli_si128, _mm_srli_si128, _mm_storeu_si128,
+    _mm_unpacklo_epi64, _mm_xor_si128,
 };
 
 use crate::secret::wipe;
@@ -263,18 +263,61 @@ fn decrypt_in_place(block: &mut [u8], keys: &RoundKeys, rounds: usize) {
     store(block, _mm_aesdeclast_si128(state, load(&keys[rounds])));
 }
 
-/// Encrypts each whole block of `data` in place, one after another.
+/// The number of blocks [`encrypt_all`] and [`decrypt_all`] work on together. Each
+/// round key goes to all of them before the next one, so their rounds overlap in the
+/// processor instead of each waiting for the round before it.
+const LANES: usize = 8;
+
+/// Encrypts each whole block of `data` in place, [`LANES`] at a time, and any
+/// remaining blocks one after another.
 #[target_feature(enable = "aes")]
 fn encrypt_all(data: &mut [u8], keys: &RoundKeys, rounds: usize) {
-    for block in data.chunks_exact_mut(16) {
+    let mut groups = data.chunks_exact_mut(LANES * 16);
+    for group in &mut groups {
+        let first = load(&keys[0]);
+        let mut states = [_mm_setzero_si128(); LANES];
+        for (state, block) in states.iter_mut().zip(group.chunks_exact(16)) {
+            *state = _mm_xor_si128(load(block), first);
+        }
+        for key in &keys[1..rounds] {
+            let key = load(key);
+            for state in &mut states {
+                *state = _mm_aesenc_si128(*state, key);
+            }
+        }
+        let last = load(&keys[rounds]);
+        for (state, block) in states.iter().zip(group.chunks_exact_mut(16)) {
+            store(block, _mm_aesenclast_si128(*state, last));
+        }
+    }
+    for block in groups.into_remainder().chunks_exact_mut(16) {
         encrypt_in_place(block, keys, rounds);
     }
 }
 
-/// Decrypts each whole block of `data` in place, one after another.
+/// Decrypts each whole block of `data` in place, [`LANES`] at a time, and any
+/// remaining blocks one after another.
 #[target_feature(enable = "aes")]
 fn decrypt_all(data: &mut [u8], keys: &RoundKeys, rounds: usize) {
-    for block in data.chunks_exact_mut(16) {
+    let mut groups = data.chunks_exact_mut(LANES * 16);
+    for group in &mut groups {
+        let first = load(&keys[0]);
+        let mut states = [_mm_setzero_si128(); LANES];
+        for (state, block) in states.iter_mut().zip(group.chunks_exact(16)) {
+            *state = _mm_xor_si128(load(block), first);
+        }
+        for key in &keys[1..rounds] {
+            let key = load(key);
+            for state in &mut states {
+                *state = _mm_aesdec_si128(*state, key);
+            }
+        }
+        let last = load(&keys[rounds]);
+        for (state, block) in states.iter().zip(group.chunks_exact_mut(16)) {
+            store(block, _mm_aesdeclast_si128(*state, last));
+        }
+    }
+    for block in groups.into_remainder().chunks_exact_mut(16) {
         decrypt_in_place(block, keys, rounds);
     }
 }
