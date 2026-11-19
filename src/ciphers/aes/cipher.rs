@@ -226,4 +226,21 @@ impl<const KEY_SIZE: usize> BlockCipher for AesCipher<KEY_SIZE> {
             }
         }
     }
+
+    /// Applies the CTR keystream on AES-NI, and returns `false` on the table-based
+    /// implementation, which leaves the work to the mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics on AES-NI if `counter` isn't exactly 16 bytes long.
+    #[cfg(all(feature = "aes-ni", any(target_arch = "x86", target_arch = "x86_64")))]
+    fn apply_ctr(&self, counter: &mut [u8], data: &mut [u8]) -> bool {
+        match &self.engine {
+            Engine::Textbook { .. } => false,
+            Engine::AesNi(keys) => {
+                keys.apply_ctr(counter, data);
+                true
+            }
+        }
+    }
 }

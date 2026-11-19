@@ -211,6 +211,29 @@ fn aes_ctr_matches_rustcrypto() {
     }
 }
 
+/// The low 64 bits of the counter start 21 blocks below their wrap, so the carry into
+/// the high half falls inside the message. Splitting it across two calls moves where
+/// each group of 8 blocks starts: the splits give a group that wraps, one that ends
+/// exactly at the highest low half, and one that starts a block later and wraps.
+#[test]
+fn aes_ctr_matches_rustcrypto_across_a_64_bit_carry() {
+    let mut iv = [0x01u8; 16];
+    iv[8..].copy_from_slice(&(u64::MAX - 20).to_be_bytes());
+    let pt = plaintext(70 * 16 + 9);
+
+    let mut reference = pt.clone();
+    ctr::Ctr128BE::<aes::Aes128>::new(&AES_KEY.into(), &iv.into()).apply_keystream(&mut reference);
+
+    for split in [0, 5, 6, 37] {
+        let mut ciphertext = pt.clone();
+        let mut mode = Ctr::new(Aes128Cipher::new(&AES_KEY), &iv).unwrap();
+        let (first, second) = ciphertext.split_at_mut(split * 16);
+        mode.apply_keystream(first).unwrap();
+        mode.apply_keystream(second).unwrap();
+        assert_eq!(ciphertext, reference, "split at block {split}");
+    }
+}
+
 // ---- gcm ----
 
 #[test]
