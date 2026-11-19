@@ -1,8 +1,8 @@
 //! Galois/Counter Mode (NIST SP 800-38D): the two directions and the sizes and
 //! limits they share.
 
-use super::blocks::xor_into;
-use super::ctr::Ctr;
+use super::blocks::{PAR_CHUNK_BLOCKS, xor_into};
+use super::ctr::{Ctr, Order};
 use super::errors::ModeError;
 use super::ghash::{BLOCK_LEN, Ghash};
 use crate::ciphers::traits::BlockCipher;
@@ -99,6 +99,36 @@ impl<C: BlockCipher> GcmState<C> {
         Ok(())
     }
 
+    /// Encrypts or decrypts `data` in place and adds its ciphertext to the hash: after
+    /// the keystream when encrypting, before it when decrypting, as `order` says.
+    ///
+    /// When the counter step splits the data between threads, each piece is hashed on
+    /// its own thread and the hashes are folded into the state in order.
+    fn apply(&mut self, data: &mut [u8], order: Order) -> Result<(), ModeError> {
+        self.check_len(data.len())?;
+        let ghash = &self.ghash;
+        let pieces = self.ctr.apply_in_pieces(data, order, |piece| ghash.partial(piece))?;
+        match pieces {
+            Some(mut partials) => {
+                self.ghash.fold(&partials, PAR_CHUNK_BLOCKS, data.len());
+                // With the ciphertext known, these values could give away `H`.
+                wipe(&mut partials);
+            }
+            None => match order {
+                Order::AfterKeystream => {
+                    self.ctr.apply_keystream(data)?;
+                    self.ghash.update(data);
+                }
+                Order::BeforeKeystream => {
+                    self.ghash.update(data);
+                    self.ctr.apply_keystream(data)?;
+                }
+            },
+        }
+        self.data_len += data.len() as u64;
+        Ok(())
+    }
+
     /// Returns `GHASH(...) ^ E(K, J0)`: SP 800-38D section 7.1, step 6.
     fn tag(&mut self) -> [u8; TAG_LEN] {
         let mut tag = self.ghash.finish(self.aad_len, self.data_len);
@@ -166,9 +196,10 @@ impl<C: BlockCipher> GcmEncryptor<C> {
         })
     }
 
-    /// Sets whether the counter step splits its work between the threads of the
-    /// current Rayon pool, as [`Ctr::parallel`] does. GHASH always runs on the
-    /// calling thread.
+    /// Sets whether to split the work between the threads of the current Rayon pool,
+    /// in the pieces that [`Ctr::parallel`] uses. Each piece is hashed on the thread
+    /// that applies its keystream, and the hashes are combined in order, so the output
+    /// and the tag are the same either way.
     pub fn parallel(mut self, on: bool) -> Self {
         self.state.ctr.parallel = on;
         self
@@ -184,11 +215,7 @@ impl<C: BlockCipher> GcmEncryptor<C> {
     /// block, or [`ModeError::MessageTooLong`] past [`MAX_PLAINTEXT_LEN`]. Either
     /// way `data` is left unchanged.
     pub fn update(&mut self, data: &mut [u8]) -> Result<(), ModeError> {
-        self.state.check_len(data.len())?;
-        self.state.ctr.apply_keystream(data)?;
-        self.state.ghash.update(data);
-        self.state.data_len += data.len() as u64;
-        Ok(())
+        self.state.apply(data, Order::AfterKeystream)
     }
 
     /// Ends the message and returns its authentication tag.
@@ -219,9 +246,10 @@ impl<C: BlockCipher> GcmDecryptor<C> {
         })
     }
 
-    /// Sets whether the counter step splits its work between the threads of the
-    /// current Rayon pool, as [`Ctr::parallel`] does. GHASH always runs on the
-    /// calling thread.
+    /// Sets whether to split the work between the threads of the current Rayon pool,
+    /// in the pieces that [`Ctr::parallel`] uses. Each piece is hashed on the thread
+    /// that applies its keystream, and the hashes are combined in order, so the output
+    /// and the tag are the same either way.
     pub fn parallel(mut self, on: bool) -> Self {
         self.state.ctr.parallel = on;
         self
@@ -236,11 +264,7 @@ impl<C: BlockCipher> GcmDecryptor<C> {
     ///
     /// As for [`GcmEncryptor::update`], with `data` left unchanged.
     pub fn update(&mut self, data: &mut [u8]) -> Result<(), ModeError> {
-        self.state.check_len(data.len())?;
-        self.state.ghash.update(data);
-        self.state.ctr.apply_keystream(data)?;
-        self.state.data_len += data.len() as u64;
-        Ok(())
+        self.state.apply(data, Order::BeforeKeystream)
     }
 
     /// Ends the message and checks its tag.

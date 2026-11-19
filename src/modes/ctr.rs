@@ -90,24 +90,11 @@ impl<C: BlockCipher> Ctr<C> {
             return Err(ModeError::DataAfterPartialBlock);
         }
 
-        let chunk_len = PAR_CHUNK_BLOCKS * C::BLOCK_SIZE;
-        if self.parallel && data.len() > chunk_len {
-            let cipher = &self.cipher;
-            let first = &self.counter[..C::BLOCK_SIZE];
-            data.par_chunks_mut(chunk_len)
-                .enumerate()
-                .for_each(|(index, chunk)| {
-                    let mut counter = [0u8; MAX_BLOCK_LEN];
-                    let counter = &mut counter[..C::BLOCK_SIZE];
-                    counter.copy_from_slice(first);
-                    add(counter, (index * PAR_CHUNK_BLOCKS) as u64);
-                    apply_from(cipher, counter, chunk);
-                });
-            add(
-                &mut self.counter[..C::BLOCK_SIZE],
-                data.len().div_ceil(C::BLOCK_SIZE) as u64,
-            );
-            self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
+        // A `Vec<()>` doesn't allocate.
+        if self
+            .apply_in_pieces(data, Order::AfterKeystream, |_| ())?
+            .is_some()
+        {
             return Ok(());
         }
 
@@ -115,6 +102,79 @@ impl<C: BlockCipher> Ctr<C> {
         self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
         Ok(())
     }
+
+    /// Applies the keystream to `data` in pieces of [`PAR_CHUNK_BLOCKS`] blocks on the
+    /// current Rayon pool, as [`apply_keystream`](Self::apply_keystream) does in
+    /// parallel, and runs `each` on every piece on the same thread, before or after its
+    /// keystream as `order` says. Continues from the previous call, like
+    /// `apply_keystream`.
+    ///
+    /// Returns the results in the order of the pieces, or `None`, with `data` and the
+    /// counter unchanged, when the data stays on one thread: parallel processing is off,
+    /// or `data` is no longer than one piece.
+    ///
+    /// # Errors
+    ///
+    /// [`ModeError::DataAfterPartialBlock`] if the data would be split and an earlier
+    /// chunk ended in a partial block, in which case `data` is left unchanged.
+    pub(super) fn apply_in_pieces<R, F>(
+        &mut self,
+        data: &mut [u8],
+        order: Order,
+        each: F,
+    ) -> Result<Option<Vec<R>>, ModeError>
+    where
+        R: Send,
+        F: Fn(&[u8]) -> R + Sync,
+    {
+        let chunk_len = PAR_CHUNK_BLOCKS * C::BLOCK_SIZE;
+        if !self.parallel || data.len() <= chunk_len {
+            return Ok(None);
+        }
+        if self.ended {
+            return Err(ModeError::DataAfterPartialBlock);
+        }
+
+        let cipher = &self.cipher;
+        let first = &self.counter[..C::BLOCK_SIZE];
+        let results = data
+            .par_chunks_mut(chunk_len)
+            .enumerate()
+            .map(|(index, chunk)| {
+                let mut counter = [0u8; MAX_BLOCK_LEN];
+                let counter = &mut counter[..C::BLOCK_SIZE];
+                counter.copy_from_slice(first);
+                add(counter, (index * PAR_CHUNK_BLOCKS) as u64);
+                match order {
+                    Order::BeforeKeystream => {
+                        let result = each(chunk);
+                        apply_from(cipher, counter, chunk);
+                        result
+                    }
+                    Order::AfterKeystream => {
+                        apply_from(cipher, counter, chunk);
+                        each(chunk)
+                    }
+                }
+            })
+            .collect();
+        add(
+            &mut self.counter[..C::BLOCK_SIZE],
+            data.len().div_ceil(C::BLOCK_SIZE) as u64,
+        );
+        self.ended = !data.len().is_multiple_of(C::BLOCK_SIZE);
+        Ok(Some(results))
+    }
+}
+
+/// Whether [`Ctr::apply_in_pieces`] runs its function on a piece before or after
+/// applying the piece's keystream.
+#[derive(Clone, Copy)]
+pub(super) enum Order {
+    /// On the input, as GCM decryption hashes the ciphertext.
+    BeforeKeystream,
+    /// On the output, as GCM encryption hashes the ciphertext.
+    AfterKeystream,
 }
 
 /// XORs the keystream that starts at `counter` into `data`, leaving `counter` one

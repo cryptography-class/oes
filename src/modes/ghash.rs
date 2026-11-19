@@ -10,6 +10,10 @@
 //! feature on x86-64, processors that also have the 256-bit form of the instruction
 //! absorb whole groups of 8 blocks with it first. Table-based methods aren't used,
 //! because their tables are indexed by secret data, which can leak through the cache.
+//!
+//! The hash of a long message can be split: each piece is hashed on its own from zero,
+//! and [`Ghash::fold`] adds the results in order with powers of `H`. GCM uses this to
+//! hash pieces on the threads that encrypt them.
 
 #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
 use super::pclmul::Pclmul;
@@ -73,13 +77,35 @@ impl Ghash {
     /// Absorbs `data`, padding a partial last block with zeros. Only the last call
     /// for the AAD and the last call for the ciphertext may be partial.
     pub(super) fn update(&mut self, data: &[u8]) {
-        let (blocks, rest) = data.split_at(data.len() - data.len() % BLOCK_LEN);
-        self.absorb(blocks);
-        if !rest.is_empty() {
-            let mut last = [0u8; BLOCK_LEN];
-            last[..rest.len()].copy_from_slice(rest);
-            self.absorb(&last);
+        self.y = self.hash_from(self.y, data);
+    }
+
+    /// Returns the hash of `data` alone, from `Y = 0`, padding a partial last block
+    /// with zeros, without changing this hash. [`fold`](Self::fold) adds such hashes
+    /// of consecutive pieces to it.
+    pub(super) fn partial(&self, data: &[u8]) -> u128 {
+        self.hash_from(0, data)
+    }
+
+    /// Adds the hashes of consecutive pieces of `len` bytes in all, each from
+    /// [`partial`](Self::partial), with the same result as calling
+    /// [`update`](Self::update) on the whole.
+    ///
+    /// Absorbing `m` blocks into `Y` gives `Y * H^m ^ P`, where `P` is the hash of those
+    /// blocks alone: each step of `Y_i = (Y_{i-1} ^ X_i) * H` (SP 800-38D section 6.4)
+    /// multiplies what came before by `H`. Every piece but the last is `piece_blocks`
+    /// blocks long, and the last covers the rest of `len`, a partial block counting as
+    /// one.
+    pub(super) fn fold(&mut self, partials: &[u128], piece_blocks: usize, len: usize) {
+        let Some((last, pieces)) = partials.split_last() else {
+            return;
+        };
+        let full = self.power(piece_blocks as u64);
+        for &partial in pieces {
+            self.y = self.multiply(self.y, full) ^ partial;
         }
+        let last_blocks = len.div_ceil(BLOCK_LEN) - pieces.len() * piece_blocks;
+        self.y = self.multiply(self.y, self.power(last_blocks as u64)) ^ last;
     }
 
     /// Absorbs the final block `[len(A)]_64 || [len(C)]_64`, with both lengths in
@@ -93,25 +119,63 @@ impl Ghash {
 
     /// Absorbs each whole block of `blocks`.
     fn absorb(&mut self, blocks: &[u8]) {
+        self.y = self.absorb_from(self.y, blocks);
+    }
+
+    /// Returns `y` after absorbing `data`, padding a partial last block with zeros.
+    fn hash_from(&self, y: u128, data: &[u8]) -> u128 {
+        let (blocks, rest) = data.split_at(data.len() - data.len() % BLOCK_LEN);
+        let y = self.absorb_from(y, blocks);
+        if rest.is_empty() {
+            return y;
+        }
+        let mut last = [0u8; BLOCK_LEN];
+        last[..rest.len()].copy_from_slice(rest);
+        self.absorb_from(y, &last)
+    }
+
+    /// Returns `y` after absorbing each whole block of `blocks`.
+    fn absorb_from(&self, y: u128, blocks: &[u8]) -> u128 {
         #[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
-        let blocks = match self.vpclmul {
-            Some(vpclmul) => {
-                let (y, rest) = vpclmul.absorb_groups(self.y, self.h, blocks);
-                self.y = y;
-                rest
-            }
-            None => blocks,
+        let (y, blocks) = match self.vpclmul {
+            Some(vpclmul) => vpclmul.absorb_groups(y, self.h, blocks),
+            None => (y, blocks),
         };
         #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
         if let Some(pclmul) = self.pclmul {
-            self.y = pclmul.absorb(self.y, self.h, blocks);
-            return;
+            return pclmul.absorb(y, self.h, blocks);
         }
+        let mut y = y;
         for block in blocks.chunks_exact(BLOCK_LEN) {
             let mut bytes = [0u8; BLOCK_LEN];
             bytes.copy_from_slice(block);
-            self.y = gf_mul(self.y ^ u128::from_be_bytes(bytes), self.h);
+            y = gf_mul(y ^ u128::from_be_bytes(bytes), self.h);
         }
+        y
+    }
+
+    /// Returns `a * b`, with `PCLMULQDQ` when the processor has it.
+    fn multiply(&self, a: u128, b: u128) -> u128 {
+        #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
+        if let Some(pclmul) = self.pclmul {
+            return pclmul.multiply(a, b);
+        }
+        gf_mul(a, b)
+    }
+
+    /// Returns `H^n`, by squaring. The field's 1 is bit 0 of the standard, which is the
+    /// top bit of the integer.
+    fn power(&self, mut n: u64) -> u128 {
+        let mut result = 1 << 127;
+        let mut square = self.h;
+        while n > 0 {
+            if n & 1 == 1 {
+                result = self.multiply(result, square);
+            }
+            square = self.multiply(square, square);
+            n >>= 1;
+        }
+        result
     }
 }
 
