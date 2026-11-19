@@ -555,14 +555,19 @@ impl AesNiKeys {
     }
 
     /// XORs the CTR keystream that starts at the 16-byte big-endian `counter` into
-    /// `data`, of any length, and leaves `counter` one past the last block used. The
-    /// counter wraps at 2^128, and a partial last block uses the start of its
-    /// keystream block.
+    /// `data`, of any length, and leaves `counter` one past the last block used, with
+    /// whole groups of 16 blocks on VAES when the processor has it. The counter wraps
+    /// at 2^128, and a partial last block uses the start of its keystream block.
     ///
     /// # Panics
     ///
     /// Panics if `counter` isn't exactly 16 bytes long.
     pub fn apply_ctr(&self, counter: &mut [u8], data: &mut [u8]) {
+        #[cfg(all(feature = "vaes", target_arch = "x86_64"))]
+        let data = match self.vaes {
+            Some(vaes) => vaes.ctr_apply_groups(counter, data, &self.encrypt[..=self.rounds]),
+            None => data,
+        };
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { ctr_apply_all(counter, data, &self.encrypt, self.rounds) }
     }

@@ -213,8 +213,9 @@ fn aes_ctr_matches_rustcrypto() {
 
 /// The low 64 bits of the counter start 21 blocks below their wrap, so the carry into
 /// the high half falls inside the message. Splitting it across two calls moves where
-/// each group of 8 blocks starts: the splits give a group that wraps, one that ends
-/// exactly at the highest low half, and one that starts a block later and wraps.
+/// each group of 8 or 16 blocks starts: for either size, the splits give a group that
+/// wraps, one that ends exactly at the highest low half, and one that starts a block
+/// later and wraps.
 #[test]
 fn aes_ctr_matches_rustcrypto_across_a_64_bit_carry() {
     let mut iv = [0x01u8; 16];

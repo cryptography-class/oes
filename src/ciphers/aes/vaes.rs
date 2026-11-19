@@ -15,9 +15,10 @@
 //! them first, so holding one proves that the check passed.
 
 use std::arch::x86_64::{
-    __m256i, _mm_loadu_si128, _mm256_aesdec_epi128, _mm256_aesdeclast_epi128, _mm256_aesenc_epi128,
-    _mm256_aesenclast_epi128, _mm256_broadcastsi128_si256, _mm256_loadu_si256,
-    _mm256_setzero_si256, _mm256_storeu_si256, _mm256_xor_si256,
+    __m256i, _mm_loadu_si128, _mm_set_epi8, _mm256_add_epi64, _mm256_aesdec_epi128,
+    _mm256_aesdeclast_epi128, _mm256_aesenc_epi128, _mm256_aesenclast_epi128,
+    _mm256_broadcastsi128_si256, _mm256_loadu_si256, _mm256_set_epi64x, _mm256_setzero_si256,
+    _mm256_shuffle_epi8, _mm256_storeu_si256, _mm256_xor_si256,
 };
 
 /// The number of registers in a group, each holding two blocks.
@@ -115,6 +116,63 @@ fn decrypt_groups<'a>(data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
     groups.into_remainder()
 }
 
+/// XORs the CTR keystream that starts at the 16-byte big-endian `counter` into each
+/// whole group of `data`, leaves `counter` one past the last block used, and returns
+/// the bytes after the last group. `keys` holds the `Nr + 1` round keys in encryption
+/// order.
+///
+/// Each register holds two counters byte-reversed, so `_mm256_add_epi64` adds to the
+/// low 64 bits of both, and one shuffle turns each half back into a big-endian block.
+/// A group in which the low 64 bits would wrap builds its counters from a `u128`
+/// instead, so the carry reaches the high half.
+#[target_feature(enable = "aes,avx2,vaes")]
+fn ctr_apply_groups<'a>(counter: &mut [u8], data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
+    let rounds = keys.len() - 1;
+    let wide = wide_keys(keys);
+    // Byte i of each half of the result is byte 15 - i of the same half of the input.
+    let swap = _mm256_broadcastsi128_si256(_mm_set_epi8(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ));
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(counter);
+    let mut value = u128::from_be_bytes(bytes);
+    let mut groups = data.chunks_exact_mut(GROUP_LEN);
+    for group in &mut groups {
+        let low = value as u64;
+        let mut states = [_mm256_setzero_si256(); WIDE];
+        if low <= u64::MAX - (2 * WIDE as u64 - 1) {
+            let high = (value >> 64) as i64;
+            let base = _mm256_set_epi64x(high, low as i64, high, low as i64);
+            for (i, state) in states.iter_mut().enumerate() {
+                // The first block of the pair is the low half of the register.
+                let step = _mm256_set_epi64x(0, 2 * i as i64 + 1, 0, 2 * i as i64);
+                let next = _mm256_shuffle_epi8(_mm256_add_epi64(base, step), swap);
+                *state = _mm256_xor_si256(next, wide[0]);
+            }
+        } else {
+            for (i, state) in states.iter_mut().enumerate() {
+                let first = value.wrapping_add(2 * i as u128);
+                let mut pair = [0u8; 32];
+                pair[..16].copy_from_slice(&first.to_be_bytes());
+                pair[16..].copy_from_slice(&first.wrapping_add(1).to_be_bytes());
+                *state = _mm256_xor_si256(load(&pair), wide[0]);
+            }
+        }
+        value = value.wrapping_add(2 * WIDE as u128);
+        for key in &wide[1..rounds] {
+            for state in &mut states {
+                *state = _mm256_aesenc_epi128(*state, *key);
+            }
+        }
+        for (state, pair) in states.iter().zip(group.chunks_exact_mut(32)) {
+            let keystream = _mm256_aesenclast_epi128(*state, wide[rounds]);
+            store(pair, _mm256_xor_si256(keystream, load(pair)));
+        }
+    }
+    counter.copy_from_slice(&value.to_be_bytes());
+    groups.into_remainder()
+}
+
 /// Proof that the processor has AES-NI, AVX2 and VAES.
 #[derive(Clone, Copy)]
 pub(super) struct Vaes(());
@@ -150,5 +208,24 @@ impl Vaes {
     pub(super) fn decrypt_groups<'a>(self, data: &'a mut [u8], keys: &[[u8; 16]]) -> &'a mut [u8] {
         // SAFETY: `detect` is the only constructor, and it checks for these instructions.
         unsafe { decrypt_groups(data, keys) }
+    }
+
+    /// XORs the CTR keystream that starts at the 16-byte big-endian `counter` into each
+    /// whole group of 16 blocks of `data`, leaves `counter` one past the last block
+    /// used, and returns the bytes after the last group. The counter wraps at 2^128.
+    /// `keys` holds the `Nr + 1` round keys in encryption order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `counter` isn't exactly 16 bytes long, or if `keys` is empty or holds
+    /// more than 15 keys.
+    pub(super) fn ctr_apply_groups<'a>(
+        self,
+        counter: &mut [u8],
+        data: &'a mut [u8],
+        keys: &[[u8; 16]],
+    ) -> &'a mut [u8] {
+        // SAFETY: `detect` is the only constructor, and it checks for these instructions.
+        unsafe { ctr_apply_groups(counter, data, keys) }
     }
 }
