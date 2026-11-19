@@ -2,6 +2,7 @@ use super::blocks::PAR_CHUNK_BLOCKS;
 use super::ctr::add;
 use super::errors::ModeError;
 use super::{BlockMode, Cbc, Ctr, Ecb};
+use crate::ciphers::aes::Aes128Cipher;
 use crate::ciphers::des::DesCipher;
 use crate::ciphers::traits::KeyInit;
 
@@ -273,6 +274,25 @@ fn ctr_matches_ecb_of_literal_counter_blocks() {
         Ctr::new(des(), &counters[0]).unwrap().apply_keystream(&mut data).unwrap();
         assert_eq!(data, expected, "starting at {:02X?}", counters[0]);
     }
+}
+
+/// The same check with a 16-byte block, where the counter fills the whole integer it
+/// is held in. The last block is partial.
+#[test]
+fn ctr_wraps_a_16_byte_counter() {
+    let mut last = [0u8; 16];
+    last[15] = 0x01;
+    let counters = [[0xFF; 16], [0x00; 16], last];
+    let cipher = || Aes128Cipher::new(&[0x2B; 16]);
+    let plaintext = sample(40);
+
+    let mut keystream = counters.concat();
+    Ecb::new(cipher()).encrypt(&mut keystream).unwrap();
+    let expected: Vec<u8> = plaintext.iter().zip(&keystream).map(|(p, k)| p ^ k).collect();
+
+    let mut data = plaintext;
+    Ctr::new(cipher(), &counters[0]).unwrap().apply_keystream(&mut data).unwrap();
+    assert_eq!(data, expected);
 }
 
 #[test]
