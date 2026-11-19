@@ -2,10 +2,12 @@
 //! time spent on cryptography alone. The RustCrypto crates `aes`, `ecb`, `cbc`,
 //! `ctr` and `aes-gcm` are benchmarked alongside as the reference implementation,
 //! under names prefixed with `rustcrypto-`, and they select their own backend. The other
-//! lines use AES-NI on x86 and x86-64 processors that have it, and the table-based
-//! implementation everywhere else. Building without the `aes-ni` feature selects the
-//! table-based implementation for those lines only. In the `gcm` lines, GHASH uses
-//! `PCLMULQDQ` when the processor has it, unless built without the `pclmulqdq` feature.
+//! lines use AES-NI on x86 and x86-64 processors that have it, with VAES taking groups
+//! of 16 blocks on x86-64 processors that also have that, and the table-based
+//! implementation everywhere else. Building without the `aes-ni` or `vaes` feature
+//! turns that engine off for those lines only. In the `gcm` lines, GHASH uses
+//! `PCLMULQDQ` when the processor has it, and `VPCLMULQDQ` for groups of 8 blocks where
+//! available, unless built without the `pclmulqdq` or `vpclmulqdq` feature.
 //!
 //! Groups:
 //! - `aes-block`: encryption and decryption of one block, and the key schedule,
@@ -16,6 +18,9 @@
 //!   same work, and the in-place buffer would no longer match its tag after the
 //!   first run. The `gcm-aad-only` lines hash the buffer as AAD with no plaintext,
 //!   which times GHASH on its own.
+//! - `aes-threads`: parallel AES-128 CTR and GCM encryption of 10 MiB with a growing
+//!   thread count, which is the x axis of its chart. CTR is the floor that GCM
+//!   approaches as GHASH spreads over the threads.
 //!
 //! ECB is insecure and must not be used to protect real data.
 
@@ -23,6 +28,7 @@
 mod common;
 
 use std::hint::black_box;
+use std::thread::available_parallelism;
 
 use aes::cipher::block_padding::NoPadding;
 use aes::cipher::{
@@ -31,9 +37,11 @@ use aes::cipher::{
 };
 use aes_gcm::aead::AeadInOut;
 use aes_gcm::{Aes128Gcm, Aes256Gcm};
-use common::{SIZES, id, payload, set_size, size_group};
+use common::{SIZES, THREAD_COUNTS, id, payload, pool, set_size, size_group};
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
+use criterion::{
+    BatchSize, BenchmarkGroup, BenchmarkId, Criterion, criterion_group, criterion_main,
+};
 use oes::ciphers::aes::{Aes128Cipher, Aes192Cipher, Aes256Cipher};
 use oes::ciphers::traits::KeyInit;
 use oes::modes::{Cbc, Ctr, Ecb, GcmEncryptor};
@@ -342,5 +350,53 @@ fn aes_mode_decrypt(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, aes_block, aes_mode_encrypt, aes_mode_decrypt);
+fn aes_threads(c: &mut Criterion) {
+    // No throughput, as in the DES `threads` group: the chart needs the thread count
+    // on its x axis.
+    let mut group = size_group(c, "aes-threads");
+    let cores = available_parallelism().map_or(1, |n| n.get());
+    let buf = &mut payload(SIZES[1]);
+    let key = key::<16>();
+
+    for threads in THREAD_COUNTS.into_iter().filter(|&n| n <= cores) {
+        let pool = pool(Some(threads));
+        group.bench_function(BenchmarkId::new("ctr", threads), |b| {
+            b.iter_batched(
+                || {
+                    Ctr::new(Aes128Cipher::new(&key), &IV)
+                        .unwrap()
+                        .parallel(true)
+                },
+                |mut mode| {
+                    pool.install(|| mode.apply_keystream(black_box(&mut *buf)))
+                        .unwrap()
+                },
+                BatchSize::SmallInput,
+            )
+        });
+        group.bench_function(BenchmarkId::new("gcm", threads), |b| {
+            b.iter_batched(
+                || {
+                    GcmEncryptor::new(Aes128Cipher::new(&key), &NONCE, &[])
+                        .unwrap()
+                        .parallel(true)
+                },
+                |mut mode| {
+                    pool.install(|| mode.update(black_box(&mut *buf))).unwrap();
+                    black_box(mode.finish())
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    aes_block,
+    aes_mode_encrypt,
+    aes_mode_decrypt,
+    aes_threads
+);
 criterion_main!(benches);

@@ -4,9 +4,14 @@ use std::time::Duration;
 
 use criterion::measurement::WallTime;
 use criterion::{AxisScale, BenchmarkGroup, BenchmarkId, Criterion, PlotConfiguration, Throughput};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 /// The input sizes of every size group: 1 MiB, 10 MiB and 100 MiB (104.9 MB).
 pub const SIZES: [usize; 3] = [1 << 20, 10 << 20, 100 << 20];
+
+/// The thread counts of the thread groups. Counts above the number of cores are
+/// skipped, so the charts depend on the machine.
+pub const THREAD_COUNTS: [usize; 7] = [1, 2, 4, 6, 8, 10, 12];
 
 /// A fixed key and IV. Benchmarks never protect real data, so a constant key and a
 /// reused IV are acceptable here and nowhere else.
@@ -47,4 +52,13 @@ pub fn set_size(group: &mut BenchmarkGroup<'_, WallTime>, size: usize) -> String
 /// Returns the id of `function` at the size `label`.
 pub fn id(function: &str, label: &str) -> BenchmarkId {
     BenchmarkId::new(function, label)
+}
+
+/// Builds a Rayon pool of `threads` threads, or of one per core when `None`.
+pub fn pool(threads: Option<usize>) -> ThreadPool {
+    let mut builder = ThreadPoolBuilder::new();
+    if let Some(threads) = threads {
+        builder = builder.num_threads(threads);
+    }
+    builder.build().unwrap()
 }

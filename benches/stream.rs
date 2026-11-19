@@ -20,6 +20,10 @@
 //!
 //! DES and ECB are insecure and must not be used to protect real data.
 
+#[expect(
+    dead_code,
+    reason = "the thread pool helpers are for the cipher benchmarks"
+)]
 mod common;
 #[path = "../src/stream/test_util.rs"]
 #[allow(dead_code)]
