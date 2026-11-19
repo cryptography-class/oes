@@ -37,7 +37,9 @@ fn schedule_word(keys: &AesNiKeys, i: usize) -> u32 {
 /// only this one fails if detection stops finding the instructions.
 #[test]
 fn detect_selects_aes_ni_exactly_when_the_processor_has_it() {
-    let available = is_x86_feature_detected!("aes") && is_x86_feature_detected!("sse2");
+    let available = is_x86_feature_detected!("aes")
+        && is_x86_feature_detected!("sse2")
+        && is_x86_feature_detected!("ssse3");
     assert_eq!(matches!(Engine::detect(), Engine::AesNi(_)), available);
 }
 
@@ -184,4 +186,18 @@ fn decrypt_cbc_runs_on_aes_ni_exactly_when_the_processor_has_it() {
     let on_aes_ni = matches!(Engine::detect(), Engine::AesNi(_));
     let cipher = Aes128Cipher::new(&[0; 16]);
     assert_eq!(cipher.decrypt_cbc(&[0; 16], &mut [0; 16]), on_aes_ni);
+}
+
+// ---- apply_ctr ----
+
+/// The output is checked through the CTR mode's tests, which pass on either path, so
+/// only this one fails if AES-NI stops taking over CTR.
+#[test]
+fn apply_ctr_runs_on_aes_ni_exactly_when_the_processor_has_it() {
+    let on_aes_ni = matches!(Engine::detect(), Engine::AesNi(_));
+    let (mut counter, mut data) = ([0; 16], [0; 16]);
+    assert_eq!(
+        Aes128Cipher::new(&[0; 16]).apply_ctr(&mut counter, &mut data),
+        on_aes_ni
+    );
 }

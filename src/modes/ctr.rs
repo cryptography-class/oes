@@ -120,9 +120,14 @@ impl<C: BlockCipher> Ctr<C> {
 /// XORs the keystream that starts at `counter` into `data`, leaving `counter` one
 /// past the last block used. The parallel path calls it once per piece.
 ///
-/// The counter blocks are encrypted [`BATCH_BLOCKS`] at a time. A partial last
-/// block uses the start of its keystream.
+/// The cipher takes over the whole keystream if it can, through
+/// [`BlockCipher::apply_ctr`]. Otherwise the counter blocks are encrypted
+/// [`BATCH_BLOCKS`] at a time. A partial last block uses the start of its keystream.
 fn apply_from<C: BlockCipher>(cipher: &C, counter: &mut [u8], data: &mut [u8]) {
+    if cipher.apply_ctr(counter, data) {
+        return;
+    }
+
     let block_size = C::BLOCK_SIZE;
     let mut buffer = [0u8; BATCH_BLOCKS * MAX_BLOCK_LEN];
 

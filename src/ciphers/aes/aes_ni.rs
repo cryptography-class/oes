@@ -7,8 +7,10 @@
 //! section 5.3.5, which is the order of operations that `aesdec` implements.
 //!
 //! Every function marked `#[target_feature]` may only run on a processor with these
-//! instructions. [`AesNiKeys::empty`] is the only way to get an [`AesNiKeys`] and
-//! checks for them first, so holding one proves that the check passed.
+//! instructions, and the CTR loop also needs the byte shuffle of SSSE3, which every
+//! processor with AES-NI has. [`AesNiKeys::empty`] is the only way to get an
+//! [`AesNiKeys`] and checks for all of them first, so holding one proves that the
+//! check passed.
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86 as arch;
@@ -16,10 +18,11 @@ use std::arch::x86 as arch;
 use std::arch::x86_64 as arch;
 
 use arch::{
-    __m128i, _mm_aesdec_si128, _mm_aesdeclast_si128, _mm_aesenc_si128, _mm_aesenclast_si128,
-    _mm_aesimc_si128, _mm_aeskeygenassist_si128, _mm_loadl_epi64, _mm_loadu_si128,
-    _mm_setzero_si128, _mm_shuffle_epi32, _mm_slli_si128, _mm_srli_si128, _mm_storeu_si128,
-    _mm_unpacklo_epi64, _mm_xor_si128,
+    __m128i, _mm_add_epi64, _mm_aesdec_si128, _mm_aesdeclast_si128, _mm_aesenc_si128,
+    _mm_aesenclast_si128, _mm_aesimc_si128, _mm_aeskeygenassist_si128, _mm_loadl_epi64,
+    _mm_loadu_si128, _mm_set_epi8, _mm_set_epi64x, _mm_setzero_si128, _mm_shuffle_epi8,
+    _mm_shuffle_epi32, _mm_slli_si128, _mm_srli_si128, _mm_storeu_si128, _mm_unpacklo_epi64,
+    _mm_xor_si128,
 };
 
 use crate::secret::wipe;
@@ -380,6 +383,60 @@ fn cbc_decrypt_all(prev: &[u8], data: &mut [u8], keys: &RoundKeys, rounds: usize
     }
 }
 
+/// XORs the CTR keystream that starts at the 16-byte big-endian `counter` into
+/// `data`, and leaves `counter` one past the last block used. Counter blocks go
+/// through the rounds [`LANES`] at a time. The counter stays in a register
+/// byte-reversed, so `_mm_add_epi64` adds to its low 64 bits, and one shuffle turns
+/// each value back into a big-endian block. A group in which the low 64 bits would
+/// wrap builds its counters from a `u128` instead, so the carry reaches the high half.
+#[target_feature(enable = "aes,ssse3")]
+fn ctr_apply_all(counter: &mut [u8], data: &mut [u8], keys: &RoundKeys, rounds: usize) {
+    // Byte i of the result is byte 15 - i of the input.
+    let swap = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(counter);
+    let mut value = u128::from_be_bytes(bytes);
+    let first = load(&keys[0]);
+    let last = load(&keys[rounds]);
+    let mut groups = data.chunks_exact_mut(LANES * 16);
+    for group in &mut groups {
+        let low = value as u64;
+        let mut states = [_mm_setzero_si128(); LANES];
+        if low <= u64::MAX - (LANES as u64 - 1) {
+            let base = _mm_set_epi64x((value >> 64) as i64, low as i64);
+            for (i, state) in states.iter_mut().enumerate() {
+                let next = _mm_add_epi64(base, _mm_set_epi64x(0, i as i64));
+                *state = _mm_xor_si128(_mm_shuffle_epi8(next, swap), first);
+            }
+        } else {
+            for (i, state) in states.iter_mut().enumerate() {
+                let block = value.wrapping_add(i as u128).to_be_bytes();
+                *state = _mm_xor_si128(load(&block), first);
+            }
+        }
+        value = value.wrapping_add(LANES as u128);
+        for key in &keys[1..rounds] {
+            let key = load(key);
+            for state in &mut states {
+                *state = _mm_aesenc_si128(*state, key);
+            }
+        }
+        for (state, block) in states.iter().zip(group.chunks_exact_mut(16)) {
+            let keystream = _mm_aesenclast_si128(*state, last);
+            store(block, _mm_xor_si128(keystream, load(block)));
+        }
+    }
+    for block in groups.into_remainder().chunks_mut(16) {
+        let mut keystream = value.to_be_bytes();
+        value = value.wrapping_add(1);
+        encrypt_in_place(&mut keystream, keys, rounds);
+        for (byte, key_byte) in block.iter_mut().zip(keystream) {
+            *byte ^= key_byte;
+        }
+    }
+    counter.copy_from_slice(&value.to_be_bytes());
+}
+
 /// The round keys of one AES key, usable only on a processor with AES-NI.
 pub struct AesNiKeys {
     /// The round keys in the order encryption uses them.
@@ -391,9 +448,12 @@ pub struct AesNiKeys {
 }
 
 impl AesNiKeys {
-    /// Returns blank keys, or `None` if the processor lacks AES-NI.
+    /// Returns blank keys, or `None` if the processor lacks AES-NI or SSSE3.
     pub fn empty() -> Option<Self> {
-        if !(is_x86_feature_detected!("aes") && is_x86_feature_detected!("sse2")) {
+        let available = is_x86_feature_detected!("aes")
+            && is_x86_feature_detected!("sse2")
+            && is_x86_feature_detected!("ssse3");
+        if !available {
             return None;
         }
         Some(Self {
@@ -469,6 +529,19 @@ impl AesNiKeys {
     pub fn decrypt_cbc(&self, prev: &[u8], data: &mut [u8]) {
         // SAFETY: `empty` is the only constructor, and it checks for these instructions.
         unsafe { cbc_decrypt_all(prev, data, &self.decrypt, self.rounds) }
+    }
+
+    /// XORs the CTR keystream that starts at the 16-byte big-endian `counter` into
+    /// `data`, of any length, and leaves `counter` one past the last block used. The
+    /// counter wraps at 2^128, and a partial last block uses the start of its
+    /// keystream block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `counter` isn't exactly 16 bytes long.
+    pub fn apply_ctr(&self, counter: &mut [u8], data: &mut [u8]) {
+        // SAFETY: `empty` is the only constructor, and it checks for these instructions.
+        unsafe { ctr_apply_all(counter, data, &self.encrypt, self.rounds) }
     }
 
     /// Erases the stored round keys from memory.
