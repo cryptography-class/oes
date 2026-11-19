@@ -6,12 +6,15 @@
 //!
 //! [`gf_mul`] is the textbook method, one shift and one conditional XOR per bit. With
 //! the `pclmulqdq` Cargo feature, which is on by default, processors that have that
-//! instruction multiply with it instead, with the same result. Table-based methods
-//! aren't used, because their tables are indexed by secret data, which can leak through
-//! the cache.
+//! instruction multiply with it instead, with the same result. With the `vpclmulqdq`
+//! feature on x86-64, processors that also have the 256-bit form of the instruction
+//! absorb whole groups of 8 blocks with it first. Table-based methods aren't used,
+//! because their tables are indexed by secret data, which can leak through the cache.
 
 #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
 use super::pclmul::Pclmul;
+#[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+use super::vpclmul::Vpclmul;
 use crate::secret::wipe;
 
 pub(super) const BLOCK_LEN: usize = 16;
@@ -48,6 +51,10 @@ pub(super) struct Ghash {
     /// Set when the processor has `PCLMULQDQ`.
     #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
     pub(super) pclmul: Option<Pclmul>,
+    /// Set when the processor also has `VPCLMULQDQ`, which then takes whole groups of
+    /// 8 blocks.
+    #[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+    pub(super) vpclmul: Option<Vpclmul>,
 }
 
 impl Ghash {
@@ -58,6 +65,8 @@ impl Ghash {
             y: 0,
             #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
             pclmul: Pclmul::detect(),
+            #[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+            vpclmul: Vpclmul::detect(),
         }
     }
 
@@ -84,6 +93,15 @@ impl Ghash {
 
     /// Absorbs each whole block of `blocks`.
     fn absorb(&mut self, blocks: &[u8]) {
+        #[cfg(all(feature = "vpclmulqdq", target_arch = "x86_64"))]
+        let blocks = match self.vpclmul {
+            Some(vpclmul) => {
+                let (y, rest) = vpclmul.absorb_groups(self.y, self.h, blocks);
+                self.y = y;
+                rest
+            }
+            None => blocks,
+        };
         #[cfg(all(feature = "pclmulqdq", any(target_arch = "x86", target_arch = "x86_64")))]
         if let Some(pclmul) = self.pclmul {
             self.y = pclmul.absorb(self.y, self.h, blocks);

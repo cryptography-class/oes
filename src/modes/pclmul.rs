@@ -18,6 +18,9 @@
 //! Every function marked `#[target_feature]` may only run on a processor with these
 //! instructions. [`Pclmul::detect`] is the only way to get a [`Pclmul`] and checks for
 //! them first, so holding one proves that the check passed.
+//!
+//! The `vpclmul` module builds its 8-block loop on the conversions, the multiplication
+//! and the reduction here.
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86 as arch;
@@ -35,14 +38,14 @@ use super::ghash::BLOCK_LEN;
 /// Moves a `u128` into a register, low half first.
 #[target_feature(enable = "pclmulqdq,ssse3")]
 #[inline]
-fn from_u128(value: u128) -> __m128i {
+pub(super) fn from_u128(value: u128) -> __m128i {
     _mm_set_epi64x((value >> 64) as i64, value as i64)
 }
 
 /// Moves a register back into a `u128`.
 #[target_feature(enable = "pclmulqdq,ssse3")]
 #[inline]
-fn to_u128(value: __m128i) -> u128 {
+pub(super) fn to_u128(value: __m128i) -> u128 {
     let mut bytes = [0u8; 16];
     // SAFETY: `bytes` is 16 writable bytes, and this store has no alignment requirement.
     unsafe { _mm_storeu_si128(bytes.as_mut_ptr().cast(), value) };
@@ -86,7 +89,7 @@ fn mul_wide(a: __m128i, b: __m128i) -> (__m128i, __m128i) {
 /// the bits that cross from one half to the other are moved separately.
 #[target_feature(enable = "pclmulqdq,ssse3")]
 #[inline]
-fn reduce(low: __m128i, high: __m128i) -> __m128i {
+pub(super) fn reduce(low: __m128i, high: __m128i) -> __m128i {
     // The bit order is reflected, so the 255-bit product sits one bit too low. Shift
     // all 256 bits left by one.
     let carry_low = _mm_srli_epi64::<63>(low);
@@ -121,7 +124,7 @@ fn reduce(low: __m128i, high: __m128i) -> __m128i {
 /// Returns `a * b` in GF(2^128), with the same result as the textbook `gf_mul`.
 #[target_feature(enable = "pclmulqdq,ssse3")]
 #[inline]
-fn multiply(a: __m128i, b: __m128i) -> __m128i {
+pub(super) fn multiply(a: __m128i, b: __m128i) -> __m128i {
     let (low, high) = mul_wide(a, b);
     reduce(low, high)
 }
