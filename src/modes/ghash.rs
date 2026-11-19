@@ -39,8 +39,9 @@ pub(super) fn gf_mul(x: u128, y: u128) -> u128 {
     z
 }
 
-/// Absorbs data one block at a time: `Y_i = (Y_{i-1} ^ X_i) * H`. Wiped on drop,
-/// because the hash subkey `H` is enough to forge tags.
+/// Absorbs data as `Y_i = (Y_{i-1} ^ X_i) * H` for each block. The `PCLMULQDQ` path
+/// works on four blocks per reduction, with the same result. Wiped on drop, because
+/// the hash subkey `H` is enough to forge tags.
 pub(super) struct Ghash {
     h: u128,
     y: u128,
